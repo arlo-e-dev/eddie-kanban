@@ -1,0 +1,16 @@
+[Unit]
+Description=Eddie's Kanban Board Server
+After=network.target
+
+[Service]
+Type=simple
+User=arlo
+WorkingDirectory=/home/arlo/.openclaw/workspace/kanban-server
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PORT=3001
+
+[Install]
+WantedBy=multi-user.target
