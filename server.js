@@ -5,6 +5,21 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+
+// Send Slack notification
+async function notifySlack(message) {
+  if (!SLACK_WEBHOOK_URL) return;
+  try {
+    await fetch(SLACK_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: message })
+    });
+  } catch (err) {
+    console.error('Slack notification failed:', err.message);
+  }
+}
 // Use /data (Fly volume) if available, otherwise local
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/data' : __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'board-data.json');
@@ -116,6 +131,11 @@ app.post('/api/tasks', (req, res) => {
   }
   
   saveData(boardData);
+  
+  // Notify Slack
+  const assignee = task.assignee ? ` (assigned to ${task.assignee})` : '';
+  notifySlack(`📋 *New task added:* ${task.title}${assignee}`);
+  
   res.json({ success: true, task });
 });
 
@@ -126,6 +146,8 @@ app.put('/api/tasks/:id', (req, res) => {
     return res.status(404).json({ error: 'Task not found' });
   }
   
+  const oldTask = { ...boardData.tasks[id] };
+  
   boardData.tasks[id] = {
     ...boardData.tasks[id],
     ...req.body,
@@ -134,6 +156,13 @@ app.put('/api/tasks/:id', (req, res) => {
   };
   
   saveData(boardData);
+  
+  // Notify Slack if status changed to blocked
+  const task = boardData.tasks[id];
+  if (task.status === 'blocked' && oldTask.status !== 'blocked') {
+    notifySlack(`🚫 *Task blocked:* "${task.title}" - ${task.blockedReason || 'No reason given'}`);
+  }
+  
   res.json({ success: true, task: boardData.tasks[id] });
 });
 
@@ -188,6 +217,13 @@ app.put('/api/tasks/:id/move', (req, res) => {
   };
   
   saveData(boardData);
+  
+  // Notify Slack
+  const task = boardData.tasks[id];
+  const statusEmoji = newStatus === 'completed' ? '✅' : newStatus === 'active' ? '🔄' : '📋';
+  const colName = target ? target.title : toColumn;
+  notifySlack(`${statusEmoji} *Task moved:* "${task.title}" → ${colName}`);
+  
   res.json({ success: true, task: boardData.tasks[id] });
 });
 
