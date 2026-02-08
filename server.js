@@ -40,6 +40,8 @@ const defaultState = {
       description: 'Install and configure OpenClaw browser relay',
       status: 'pending',
       assignee: 'Eddie',
+      priority: 'high',
+      columnId: 'todo',
       createdAt: Date.now(),
       updatedAt: Date.now()
     },
@@ -49,6 +51,9 @@ const defaultState = {
       description: 'Setup arlo-e-dev GitHub for projects',
       status: 'completed',
       assignee: 'Eddie',
+      priority: 'medium',
+      columnId: 'done',
+      completedAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now()
     },
@@ -58,6 +63,10 @@ const defaultState = {
       description: 'React app with drag-drop functionality',
       status: 'completed',
       assignee: 'Arlo',
+      priority: 'high',
+      columnId: 'done',
+      modelUsed: 'Sonnet 4.5',
+      completedAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now()
     },
@@ -67,6 +76,10 @@ const defaultState = {
       description: 'OpenClaw connected to #arlo-e channel',
       status: 'completed',
       assignee: 'Arlo',
+      priority: 'medium',
+      columnId: 'done',
+      modelUsed: 'Sonnet 4.5',
+      completedAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now()
     },
@@ -113,18 +126,20 @@ app.put('/api/board', (req, res) => {
 
 // POST - add a task
 app.post('/api/tasks', (req, res) => {
+  const targetColumn = req.body.columnId || 'todo';
   const task = {
     ...req.body,
     id: req.body.id || Date.now().toString(),
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    status: req.body.status || 'pending'
+    status: req.body.status || 'pending',
+    priority: req.body.priority || 'medium',
+    columnId: targetColumn
   };
   
   boardData.tasks[task.id] = task;
   
-  // Add to todo column if not specified
-  const targetColumn = req.body.columnId || 'todo';
+  // Add to target column
   const column = boardData.columns.find(c => c.id === targetColumn);
   if (column && !column.taskIds.includes(task.id)) {
     column.taskIds.push(task.id);
@@ -134,7 +149,8 @@ app.post('/api/tasks', (req, res) => {
   
   // Notify Slack
   const assignee = task.assignee ? ` (assigned to ${task.assignee})` : '';
-  notifySlack(`📋 *New task added:* ${task.title}${assignee}`);
+  const priorityEmoji = task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
+  notifySlack(`📋 *New task added:* ${task.title}${assignee} ${priorityEmoji}`);
   
   res.json({ success: true, task });
 });
@@ -166,6 +182,49 @@ app.put('/api/tasks/:id', (req, res) => {
   res.json({ success: true, task: boardData.tasks[id] });
 });
 
+// PATCH - partially update a task (for priority, status, etc.)
+app.patch('/api/tasks/:id', (req, res) => {
+  const { id } = req.params;
+  if (!boardData.tasks[id]) {
+    return res.status(404).json({ error: 'Task not found' });
+  }
+  
+  const oldTask = { ...boardData.tasks[id] };
+  const updates = req.body;
+  
+  // Handle completion timestamp
+  if (updates.status === 'completed' && oldTask.status !== 'completed') {
+    updates.completedAt = Date.now();
+  }
+  
+  // Clear completedAt if moving out of completed
+  if (updates.status && updates.status !== 'completed' && oldTask.completedAt) {
+    updates.completedAt = null;
+  }
+  
+  boardData.tasks[id] = {
+    ...boardData.tasks[id],
+    ...updates,
+    id, // ensure id doesn't change
+    updatedAt: Date.now()
+  };
+  
+  saveData(boardData);
+  
+  // Notify Slack of important changes
+  const task = boardData.tasks[id];
+  if (updates.priority && updates.priority !== oldTask.priority) {
+    const priorityEmoji = updates.priority === 'high' ? '🔴' : updates.priority === 'medium' ? '🟡' : '🟢';
+    notifySlack(`${priorityEmoji} *Priority changed:* "${task.title}" → ${updates.priority}`);
+  }
+  
+  if (updates.status === 'blocked' && oldTask.status !== 'blocked') {
+    notifySlack(`🚫 *Task blocked:* "${task.title}" - ${task.blockedReason || 'No reason given'}`);
+  }
+  
+  res.json({ success: true, task: boardData.tasks[id] });
+});
+
 // DELETE - remove a task
 app.delete('/api/tasks/:id', (req, res) => {
   const { id } = req.params;
@@ -187,13 +246,15 @@ app.delete('/api/tasks/:id', (req, res) => {
 // PUT - move task between columns
 app.put('/api/tasks/:id/move', (req, res) => {
   const { id } = req.params;
-  const { fromColumn, toColumn } = req.body;
+  const { fromColumn, toColumn, position } = req.body;
   
   if (!boardData.tasks[id]) {
     return res.status(404).json({ error: 'Task not found' });
   }
   
-  // Remove from source column
+  const oldStatus = boardData.tasks[id].status;
+  
+  // Remove from all columns first
   boardData.columns.forEach(col => {
     col.taskIds = col.taskIds.filter(taskId => taskId !== id);
   });
@@ -201,7 +262,11 @@ app.put('/api/tasks/:id/move', (req, res) => {
   // Add to target column
   const target = boardData.columns.find(c => c.id === toColumn);
   if (target) {
-    target.taskIds.push(id);
+    if (position !== undefined && position >= 0) {
+      target.taskIds.splice(position, 0, id);
+    } else {
+      target.taskIds.push(id);
+    }
   }
   
   // Update task status based on column
@@ -210,10 +275,25 @@ app.put('/api/tasks/:id/move', (req, res) => {
   else if (toColumn === 'in-progress') newStatus = 'active';
   else if (toColumn === 'todo') newStatus = 'pending';
   
+  const updates = {
+    status: newStatus,
+    columnId: toColumn,
+    updatedAt: Date.now()
+  };
+  
+  // Add completion timestamp if moving to done
+  if (newStatus === 'completed' && oldStatus !== 'completed') {
+    updates.completedAt = Date.now();
+  }
+  
+  // Clear completion timestamp if moving out of done
+  if (newStatus !== 'completed' && boardData.tasks[id].completedAt) {
+    updates.completedAt = null;
+  }
+  
   boardData.tasks[id] = {
     ...boardData.tasks[id],
-    status: newStatus,
-    updatedAt: Date.now()
+    ...updates
   };
   
   saveData(boardData);
