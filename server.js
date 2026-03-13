@@ -2,18 +2,29 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+const DATABASE_URL = process.env.DATABASE_URL;
+const isVercel = !!process.env.VERCEL;
 
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/data' : __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'board-data.json');
 const FRONTEND_PATH = path.join(__dirname, 'public');
+const DB_ROW_ID = 'main';
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(FRONTEND_PATH));
+
+const pool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: DATABASE_URL.includes('supabase.com') ? { rejectUnauthorized: false } : undefined
+    })
+  : null;
 
 async function notifySlack(message) {
   if (!SLACK_WEBHOOK_URL) return;
@@ -45,10 +56,7 @@ function createHistoryEvent(type, message, meta = {}) {
 function normalizeTextList(value) {
   if (Array.isArray(value)) return value.filter(Boolean).map(String);
   if (typeof value === 'string') {
-    return value
-      .split(',')
-      .map(item => item.trim())
-      .filter(Boolean);
+    return value.split(',').map(item => item.trim()).filter(Boolean);
   }
   return [];
 }
@@ -185,7 +193,7 @@ const defaultState = (() => {
   return {
     meta: {
       name: 'Eddie Ops Dashboard',
-      version: 1,
+      version: 2,
       lastUpdatedAt: nowIso()
     },
     tasks,
@@ -206,11 +214,11 @@ const defaultState = (() => {
         id: 'kanban-server',
         name: 'Eddie Dashboard',
         status: 'building',
-        environment: 'Fly.io',
+        environment: 'Vercel',
         owner: 'Arlo',
-        url: 'https://kanban-server.fly.dev',
+        url: '',
         repoUrl: 'https://github.com/arlo-e-dev/eddie-kanban',
-        notes: 'Being upgraded from a simple board into the org dashboard.',
+        notes: 'Upgraded from simple board into org dashboard.',
         updatedAt: nowIso()
       },
       {
@@ -233,7 +241,7 @@ const defaultState = (() => {
           owner: 'arlo-e-dev',
           branch: 'main',
           repoUrl: 'https://github.com/arlo-e-dev/eddie-kanban',
-          deployUrl: 'https://kanban-server.fly.dev',
+          deployUrl: '',
           notes: 'Ops dashboard repo'
         },
         {
@@ -316,7 +324,34 @@ function normalizeTaskInput(input = {}, existingTask = null) {
   };
 }
 
-function loadData() {
+async function ensureDb() {
+  if (!pool) return;
+  await pool.query(`
+    create table if not exists dashboard_state (
+      id text primary key,
+      data jsonb not null,
+      updated_at timestamptz not null default now()
+    )
+  `);
+}
+
+function cloneDefaultState() {
+  return JSON.parse(JSON.stringify(defaultState));
+}
+
+async function loadData() {
+  if (pool) {
+    await ensureDb();
+    const { rows } = await pool.query('select data from dashboard_state where id = $1 limit 1', [DB_ROW_ID]);
+    if (rows.length && rows[0].data) return rows[0].data;
+    const seeded = cloneDefaultState();
+    await pool.query(
+      'insert into dashboard_state (id, data, updated_at) values ($1, $2::jsonb, now()) on conflict (id) do update set data = excluded.data, updated_at = now()',
+      [DB_ROW_ID, JSON.stringify(seeded)]
+    );
+    return seeded;
+  }
+
   try {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
@@ -325,28 +360,39 @@ function loadData() {
   } catch (err) {
     console.error('Error loading data:', err);
   }
-  return defaultState;
+  return cloneDefaultState();
 }
 
-function saveData(data) {
+async function saveData(data) {
   data.meta = {
     ...(data.meta || {}),
     lastUpdatedAt: nowIso()
   };
+
+  if (pool) {
+    await ensureDb();
+    await pool.query(
+      'insert into dashboard_state (id, data, updated_at) values ($1, $2::jsonb, now()) on conflict (id) do update set data = excluded.data, updated_at = now()',
+      [DB_ROW_ID, JSON.stringify(data)]
+    );
+    return;
+  }
+
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-function pushActivity(message, type = 'system', meta = {}) {
-  boardData.activity.unshift(createHistoryEvent(type, message, meta));
-  boardData.activity = boardData.activity.slice(0, 50);
+function pushActivity(data, message, type = 'system', meta = {}) {
+  data.activity = data.activity || [];
+  data.activity.unshift(createHistoryEvent(type, message, meta));
+  data.activity = data.activity.slice(0, 50);
 }
 
-function ensureColumnTaskMembership(taskId, toColumn) {
-  boardData.columns.forEach(column => {
+function ensureColumnTaskMembership(data, taskId, toColumn) {
+  data.columns.forEach(column => {
     column.taskIds = column.taskIds.filter(id => id !== taskId);
   });
 
-  const target = boardData.columns.find(column => column.id === toColumn);
+  const target = data.columns.find(column => column.id === toColumn);
   if (target && !target.taskIds.includes(taskId)) {
     target.taskIds.push(taskId);
   }
@@ -365,31 +411,37 @@ function summaryFromBoard(data) {
     blocked,
     inProgress,
     highPriority,
-    liveProjects: data.projects.filter(project => project.status === 'live').length,
-    totalProjects: data.projects.length,
+    liveProjects: (data.projects || []).filter(project => project.status === 'live').length,
+    totalProjects: (data.projects || []).length,
     spendUsd: data.metrics?.apiUsage?.spendUsd || 0,
     budgetUsd: data.metrics?.apiUsage?.budgetUsd || 0
   };
 }
 
-let boardData = loadData();
+async function withBoard(mutator) {
+  const data = await loadData();
+  const result = await mutator(data);
+  return result;
+}
 
-app.get('/api/board', (req, res) => {
-  res.json(boardData);
+app.get('/api/board', async (req, res) => {
+  res.json(await loadData());
 });
 
-app.get('/api/summary', (req, res) => {
-  res.json(summaryFromBoard(boardData));
+app.get('/api/summary', async (req, res) => {
+  const data = await loadData();
+  res.json(summaryFromBoard(data));
 });
 
-app.put('/api/board', (req, res) => {
-  boardData = req.body;
-  pushActivity('Board was replaced via API.', 'system');
-  saveData(boardData);
-  res.json({ success: true, data: boardData });
+app.put('/api/board', async (req, res) => {
+  const data = req.body;
+  pushActivity(data, 'Board was replaced via API.', 'system');
+  await saveData(data);
+  res.json({ success: true, data });
 });
 
-app.post('/api/tasks', (req, res) => {
+app.post('/api/tasks', async (req, res) => {
+  const data = await loadData();
   const id = req.body.id || `task-${Date.now()}`;
   const task = normalizeTaskInput({ ...req.body, id });
   task.id = id;
@@ -399,52 +451,45 @@ app.post('/api/tasks', (req, res) => {
   task.createdBy = req.body.createdBy || 'Dashboard';
   task.history = [createHistoryEvent('created', `Task created: ${task.title}`, { createdBy: task.createdBy })];
 
-  if (!task.title) {
-    return res.status(400).json({ error: 'Task title is required' });
-  }
+  if (!task.title) return res.status(400).json({ error: 'Task title is required' });
 
-  boardData.tasks[id] = task;
-  ensureColumnTaskMembership(id, task.columnId);
-  pushActivity(`Task added: ${task.title}`, 'task', { taskId: id });
-  saveData(boardData);
+  data.tasks[id] = task;
+  ensureColumnTaskMembership(data, id, task.columnId);
+  pushActivity(data, `Task added: ${task.title}`, 'task', { taskId: id });
+  await saveData(data);
 
   const priorityEmoji = task.priority === 'high' ? '🔴' : task.priority === 'medium' ? '🟡' : '🟢';
-  notifySlack(`📋 New dashboard task: ${task.title} ${priorityEmoji}`);
+  await notifySlack(`📋 New dashboard task: ${task.title} ${priorityEmoji}`);
 
   res.json({ success: true, task });
 });
 
-app.put('/api/tasks/:id', (req, res) => {
+app.put('/api/tasks/:id', async (req, res) => {
+  const data = await loadData();
   const { id } = req.params;
-  const existing = boardData.tasks[id];
-  if (!existing) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
+  const existing = data.tasks[id];
+  if (!existing) return res.status(404).json({ error: 'Task not found' });
 
   const task = normalizeTaskInput(req.body, existing);
   task.id = id;
   task.createdAt = existing.createdAt;
   task.updatedAt = nowIso();
   task.completedAt = task.status === 'completed' ? (existing.completedAt || nowIso()) : null;
-  task.history = [
-    createHistoryEvent('updated', `Task updated: ${task.title}`),
-    ...(existing.history || [])
-  ].slice(0, 30);
+  task.history = [createHistoryEvent('updated', `Task updated: ${task.title}`), ...(existing.history || [])].slice(0, 30);
 
-  boardData.tasks[id] = task;
-  ensureColumnTaskMembership(id, task.columnId);
-  pushActivity(`Task updated: ${task.title}`, 'task', { taskId: id });
-  saveData(boardData);
+  data.tasks[id] = task;
+  ensureColumnTaskMembership(data, id, task.columnId);
+  pushActivity(data, `Task updated: ${task.title}`, 'task', { taskId: id });
+  await saveData(data);
 
   res.json({ success: true, task });
 });
 
-app.patch('/api/tasks/:id', (req, res) => {
+app.patch('/api/tasks/:id', async (req, res) => {
+  const data = await loadData();
   const { id } = req.params;
-  const existing = boardData.tasks[id];
-  if (!existing) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
+  const existing = data.tasks[id];
+  if (!existing) return res.status(404).json({ error: 'Task not found' });
 
   const before = { ...existing };
   const task = normalizeTaskInput(req.body, existing);
@@ -454,61 +499,50 @@ app.patch('/api/tasks/:id', (req, res) => {
   task.completedAt = task.status === 'completed' ? (existing.completedAt || nowIso()) : null;
 
   const changes = Object.keys(req.body).filter(key => JSON.stringify(before[key]) !== JSON.stringify(task[key]));
-  if (changes.length) {
-    task.history = [
-      createHistoryEvent('updated', `Updated ${changes.join(', ')}`, { changes }),
-      ...(existing.history || [])
-    ].slice(0, 30);
-  } else {
-    task.history = existing.history || [];
-  }
+  task.history = changes.length
+    ? [createHistoryEvent('updated', `Updated ${changes.join(', ')}`, { changes }), ...(existing.history || [])].slice(0, 30)
+    : existing.history || [];
 
-  boardData.tasks[id] = task;
-  ensureColumnTaskMembership(id, task.columnId);
-  pushActivity(`Task changed: ${task.title}`, 'task', { taskId: id, changes });
-  saveData(boardData);
+  data.tasks[id] = task;
+  ensureColumnTaskMembership(data, id, task.columnId);
+  pushActivity(data, `Task changed: ${task.title}`, 'task', { taskId: id, changes });
+  await saveData(data);
 
   if (task.columnId === 'waiting-on-eddie' && before.columnId !== 'waiting-on-eddie') {
-    notifySlack(`🛎️ Waiting on Eddie: ${task.title}`);
+    await notifySlack(`🛎️ Waiting on Eddie: ${task.title}`);
   }
-
   if (task.status === 'blocked' && before.status !== 'blocked') {
-    notifySlack(`🚫 Task blocked: ${task.title}`);
+    await notifySlack(`🚫 Task blocked: ${task.title}`);
   }
 
   res.json({ success: true, task });
 });
 
-app.delete('/api/tasks/:id', (req, res) => {
+app.delete('/api/tasks/:id', async (req, res) => {
+  const data = await loadData();
   const { id } = req.params;
-  const existing = boardData.tasks[id];
-  if (!existing) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
+  const existing = data.tasks[id];
+  if (!existing) return res.status(404).json({ error: 'Task not found' });
 
-  delete boardData.tasks[id];
-  boardData.columns.forEach(column => {
+  delete data.tasks[id];
+  data.columns.forEach(column => {
     column.taskIds = column.taskIds.filter(taskId => taskId !== id);
   });
-  pushActivity(`Task deleted: ${existing.title}`, 'task', { taskId: id });
-  saveData(boardData);
+  pushActivity(data, `Task deleted: ${existing.title}`, 'task', { taskId: id });
+  await saveData(data);
 
   res.json({ success: true });
 });
 
-app.put('/api/tasks/:id/move', (req, res) => {
+app.put('/api/tasks/:id/move', async (req, res) => {
+  const data = await loadData();
   const { id } = req.params;
   const { toColumn } = req.body;
-  const task = boardData.tasks[id];
+  const task = data.tasks[id];
+  if (!task) return res.status(404).json({ error: 'Task not found' });
 
-  if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-
-  const target = boardData.columns.find(column => column.id === toColumn);
-  if (!target) {
-    return res.status(400).json({ error: 'Invalid target column' });
-  }
+  const target = data.columns.find(column => column.id === toColumn);
+  if (!target) return res.status(400).json({ error: 'Invalid target column' });
 
   let status = task.status;
   if (toColumn === 'todo') status = 'pending';
@@ -519,90 +553,83 @@ app.put('/api/tasks/:id/move', (req, res) => {
 
   const nextActionBy = toColumn === 'waiting-on-eddie' ? 'Eddie' : task.nextActionBy || 'Arlo';
 
-  boardData.tasks[id] = {
+  data.tasks[id] = {
     ...task,
     columnId: toColumn,
     status,
     nextActionBy,
     completedAt: toColumn === 'done' ? (task.completedAt || nowIso()) : null,
     updatedAt: nowIso(),
-    history: [
-      createHistoryEvent('moved', `Moved to ${target.title}`, { toColumn }),
-      ...(task.history || [])
-    ].slice(0, 30)
+    history: [createHistoryEvent('moved', `Moved to ${target.title}`, { toColumn }), ...(task.history || [])].slice(0, 30)
   };
 
-  ensureColumnTaskMembership(id, toColumn);
-  pushActivity(`Task moved: ${task.title} → ${target.title}`, 'task', { taskId: id, toColumn });
-  saveData(boardData);
+  ensureColumnTaskMembership(data, id, toColumn);
+  pushActivity(data, `Task moved: ${task.title} → ${target.title}`, 'task', { taskId: id, toColumn });
+  await saveData(data);
 
-  res.json({ success: true, task: boardData.tasks[id] });
+  res.json({ success: true, task: data.tasks[id] });
 });
 
-app.get('/api/projects', (req, res) => {
-  res.json(boardData.projects);
+app.get('/api/projects', async (req, res) => {
+  const data = await loadData();
+  res.json(data.projects || []);
 });
 
-app.patch('/api/projects/:id', (req, res) => {
-  const project = boardData.projects.find(item => item.id === req.params.id);
-  if (!project) {
-    return res.status(404).json({ error: 'Project not found' });
-  }
+app.patch('/api/projects/:id', async (req, res) => {
+  const data = await loadData();
+  const project = (data.projects || []).find(item => item.id === req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
 
   Object.assign(project, req.body, { updatedAt: nowIso() });
-  pushActivity(`Project updated: ${project.name}`, 'project', { projectId: project.id });
-  saveData(boardData);
+  pushActivity(data, `Project updated: ${project.name}`, 'project', { projectId: project.id });
+  await saveData(data);
   res.json({ success: true, project });
 });
 
-app.get('/api/github', (req, res) => {
-  res.json(boardData.github);
+app.get('/api/github', async (req, res) => {
+  const data = await loadData();
+  res.json(data.github || {});
 });
 
-app.patch('/api/github', (req, res) => {
-  boardData.github = {
-    ...boardData.github,
-    ...req.body
-  };
-  pushActivity('GitHub section updated.', 'github');
-  saveData(boardData);
-  res.json({ success: true, github: boardData.github });
+app.patch('/api/github', async (req, res) => {
+  const data = await loadData();
+  data.github = { ...data.github, ...req.body };
+  pushActivity(data, 'GitHub section updated.', 'github');
+  await saveData(data);
+  res.json({ success: true, github: data.github });
 });
 
-app.get('/api/metrics', (req, res) => {
-  res.json(boardData.metrics);
+app.get('/api/metrics', async (req, res) => {
+  const data = await loadData();
+  res.json(data.metrics || {});
 });
 
-app.patch('/api/metrics', (req, res) => {
-  boardData.metrics = {
-    ...boardData.metrics,
+app.patch('/api/metrics', async (req, res) => {
+  const data = await loadData();
+  data.metrics = {
+    ...data.metrics,
     ...req.body,
-    apiUsage: {
-      ...boardData.metrics.apiUsage,
-      ...(req.body.apiUsage || {})
-    },
-    hostedProjects: {
-      ...boardData.metrics.hostedProjects,
-      ...(req.body.hostedProjects || {})
-    }
+    apiUsage: { ...(data.metrics?.apiUsage || {}), ...(req.body.apiUsage || {}) },
+    hostedProjects: { ...(data.metrics?.hostedProjects || {}), ...(req.body.hostedProjects || {}) }
   };
-  pushActivity('Metrics updated.', 'metric');
-  saveData(boardData);
-  res.json({ success: true, metrics: boardData.metrics });
+  pushActivity(data, 'Metrics updated.', 'metric');
+  await saveData(data);
+  res.json({ success: true, metrics: data.metrics });
 });
 
-app.get('/api/activity', (req, res) => {
-  res.json(boardData.activity || []);
+app.get('/api/activity', async (req, res) => {
+  const data = await loadData();
+  res.json(data.activity || []);
 });
 
-app.post('/api/reset', (req, res) => {
-  boardData = JSON.parse(JSON.stringify(defaultState));
-  saveData(boardData);
-  res.json({ success: true, data: boardData });
+app.post('/api/reset', async (req, res) => {
+  const data = cloneDefaultState();
+  await saveData(data);
+  res.json({ success: true, data });
 });
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: nowIso() });
+app.get('/api/health', async (req, res) => {
+  res.json({ status: 'ok', timestamp: nowIso(), storage: pool ? 'postgres' : 'json-file', platform: isVercel ? 'vercel' : 'local-or-fly' });
 });
 
 app.use((req, res, next) => {
@@ -613,7 +640,11 @@ app.use((req, res, next) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Dashboard server running on http://0.0.0.0:${PORT}`);
-  console.log(`Data file: ${DATA_FILE}`);
-});
+if (require.main === module) {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Dashboard server running on http://0.0.0.0:${PORT}`);
+    console.log(`Storage: ${pool ? 'postgres' : DATA_FILE}`);
+  });
+}
+
+module.exports = app;

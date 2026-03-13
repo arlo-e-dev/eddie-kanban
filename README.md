@@ -2,7 +2,7 @@
 
 A mobile-friendly operations dashboard built on top of the original `kanban-server`.
 
-It keeps the simple stack and persistent JSON storage, but expands the product into a glanceable command center for:
+It keeps the simple stack and expands it into a glanceable command center for:
 
 - persistent task tracking
 - a dedicated **Waiting on Eddie** lane
@@ -19,7 +19,9 @@ It keeps the simple stack and persistent JSON storage, but expands the product i
 
 - Express backend
 - Vanilla HTML/CSS/JS frontend
-- JSON file persistence (`board-data.json` locally, `/data/board-data.json` on Fly.io)
+- Persistent storage:
+  - local/Fly fallback: JSON file
+  - Vercel/production: Postgres via `DATABASE_URL`
 - Optional Slack notifications for notable task changes
 
 ## What changed from the old Kanban app
@@ -101,12 +103,19 @@ Then open: <http://localhost:3001>
 
 ## Deployment notes
 
-This app is already designed for Fly.io persistence:
+Persistence modes:
 
 - local dev uses `kanban-server/board-data.json`
-- production uses `/data/board-data.json`
+- legacy Fly deployment can use `/data/board-data.json`
+- Vercel production uses Postgres when `DATABASE_URL` is set
 
-So the dashboard remains persistent across restarts as long as the Fly volume is attached.
+That means the dashboard can stay persistent on Vercel without relying on ephemeral filesystem writes.
+
+## Current deployment
+
+- Vercel project: `workspace`
+- Production URL: `https://workspace-mzi64vuwu-eddiejordens-projects.vercel.app`
+- Deployment protection is enabled on Vercel, so authenticated viewing still follows your project protection rules.
 
 ## Next logical upgrades
 
