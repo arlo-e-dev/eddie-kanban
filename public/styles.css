@@ -115,8 +115,52 @@ input[type="checkbox"] {
 .summary-card { border-radius: 18px; padding: 1rem; }
 .summary-card.big { grid-column: span 2; }
 .summary-value { font-size: 1.7rem; font-weight: 800; margin-top: 0.25rem; }
-.summary-spark { height: 28px; margin-top: 0.65rem; display: flex; align-items: end; gap: 4px; }
-.summary-spark span { display: block; flex: 1; border-radius: 999px; opacity: 0.9; }
+.summary-microcopy {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+.summary-progress {
+  height: 8px;
+  margin-top: 0.7rem;
+  background: #0f151c;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.summary-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+.summary-button {
+  text-align: left;
+  width: 100%;
+}
+.summary-button:hover {
+  border-color: var(--border-strong);
+}
+.summary-button:focus {
+  outline-offset: 3px;
+}
+.attention-jump {
+  background: transparent;
+  border: none;
+  padding: 0;
+  min-height: unset;
+  color: var(--text);
+  font-weight: 800;
+  font-size: 1rem;
+  text-align: left;
+}
+.attention-jump:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+.task-flash {
+  border-color: #93c5fd !important;
+  box-shadow: 0 0 0 2px rgba(147,197,253,0.28), var(--shadow);
+}
 .summary-card.blue { border-left: 4px solid var(--blue); }
 .summary-card.amber { border-left: 4px solid var(--amber); }
 .summary-card.red { border-left: 4px solid var(--red); }

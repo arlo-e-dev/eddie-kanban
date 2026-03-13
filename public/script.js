@@ -77,6 +77,32 @@ function renderDashboard() {
   bindDynamicEvents();
 }
 
+function navigateSummary(targetId, filterColumn = '') {
+  if (filterColumn) {
+    renderBoard(filterColumn);
+    bindDynamicEvents();
+  } else {
+    renderBoard();
+    bindDynamicEvents();
+  }
+  const target = document.getElementById(targetId);
+  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function jumpToTask(taskId) {
+  renderBoard();
+  bindDynamicEvents();
+  const target = document.querySelector(`[data-task-id="${taskId}"]`)?.closest('.task-card');
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('task-flash');
+    setTimeout(() => target.classList.remove('task-flash'), 1600);
+  } else {
+    const board = document.getElementById('board');
+    if (board) board.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+}
+
 function bindDynamicEvents() {
   document.querySelectorAll('.status-select').forEach(select => select.addEventListener('change', handleStatusChange));
   document.querySelectorAll('.edit-btn').forEach(button => button.addEventListener('click', () => openTaskModal(button.dataset.taskId)));
@@ -106,6 +132,12 @@ function bindDynamicEvents() {
   document.querySelectorAll('.attention-next-action-select').forEach(select => {
     select.addEventListener('change', event => updateAttentionTask(event.target.dataset.taskId));
   });
+  document.querySelectorAll('.summary-button').forEach(button => {
+    button.addEventListener('click', () => navigateSummary(button.dataset.target, button.dataset.filter));
+  });
+  document.querySelectorAll('.attention-jump').forEach(button => {
+    button.addEventListener('click', () => jumpToTask(button.dataset.taskId));
+  });
   const refreshGithubBtn = document.getElementById('refresh-github-btn');
   if (refreshGithubBtn) refreshGithubBtn.onclick = () => loadGithubData(true);
 }
@@ -113,21 +145,24 @@ function bindDynamicEvents() {
 function renderSummary() {
   const tasks = Object.values(boardData.tasks || {});
   const metrics = boardData.metrics || {};
+  const monthlyBurn = Number(metrics.modelOps?.estimatedMonthlyUsd || 0);
+  const revenueTarget = Number(metrics.revenue?.targetMonthlyUsd || 0);
   const cards = [
-    { label: 'Waiting on Eddie', value: tasks.filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie').length, tone: 'amber', big: true, spark: [90, 70, 80, 60, 75, 55] },
-    { label: 'Active work', value: tasks.filter(task => task.columnId === 'in-progress').length, tone: 'blue', spark: [40, 55, 60, 70, 75, 65] },
-    { label: 'Blocked', value: tasks.filter(task => task.status === 'blocked' || task.columnId === 'blocked').length, tone: 'red', spark: [25, 45, 40, 35, 50, 30] },
-    { label: 'Live projects', value: (boardData.projects || []).filter(project => project.status === 'live').length, tone: 'green', spark: [20, 30, 45, 50, 60, 70] },
-    { label: 'Monthly AI burn', value: `$${Number(metrics.modelOps?.estimatedMonthlyUsd || 0).toFixed(0)}`, tone: 'purple', big: true, spark: [55, 58, 62, 70, 68, 73] },
-    { label: 'Revenue target', value: `$${Number(metrics.revenue?.targetMonthlyUsd || 0).toFixed(0)}`, tone: 'slate', spark: [15, 18, 22, 30, 40, 50] }
+    { label: 'Waiting on Eddie', value: tasks.filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie').length, tone: 'amber', big: true, target: 'attention-panel', filter: 'waiting-on-eddie', sublabel: 'Needs your click or answer' },
+    { label: 'Active work', value: tasks.filter(task => task.columnId === 'in-progress').length, tone: 'blue', target: 'board', filter: 'in-progress', sublabel: 'Arlo currently moving on' },
+    { label: 'Blocked', value: tasks.filter(task => task.status === 'blocked' || task.columnId === 'blocked').length, tone: 'red', target: 'board', filter: 'blocked', sublabel: 'Needs external unblock' },
+    { label: 'Live projects', value: (boardData.projects || []).filter(project => project.status === 'live').length, tone: 'green', target: 'projects-panel', sublabel: 'Tap to open project area' },
+    { label: 'Monthly AI burn', value: `$${monthlyBurn.toFixed(0)}`, tone: 'purple', big: true, target: 'metrics-panel', progress: revenueTarget ? Math.min(100, Math.round((monthlyBurn / revenueTarget) * 100)) : 0, sublabel: revenueTarget ? `${Math.round((monthlyBurn / revenueTarget) * 100)}% of revenue target` : 'Estimated burn' },
+    { label: 'Revenue target', value: `$${revenueTarget.toFixed(0)}`, tone: 'slate', target: 'metrics-panel', progress: 100, sublabel: 'Target monthly revenue' }
   ];
 
   document.getElementById('summary-grid').innerHTML = cards.map(card => `
-    <article class="summary-card ${card.tone} ${card.big ? 'big' : ''}">
+    <button class="summary-card ${card.tone} ${card.big ? 'big' : ''} summary-button" data-target="${card.target || ''}" data-filter="${card.filter || ''}">
       <div class="summary-label">${card.label}</div>
       <div class="summary-value">${card.value}</div>
-      <div class="summary-spark">${card.spark.map(v => `<span style="height:${v}% ; background:${sparkColor(card.tone)}"></span>`).join('')}</div>
-    </article>
+      <div class="summary-microcopy">${escapeHtml(card.sublabel || '')}</div>
+      <div class="summary-progress"><span style="width:${Math.max(10, Number(card.progress || Math.min(100, Number(card.value) || 10)))}%; background:${sparkColor(card.tone)}"></span></div>
+    </button>
   `).join('');
 }
 
@@ -152,9 +187,9 @@ function renderAttentionPanel() {
 
 function attentionCard(task) {
   return `
-    <div class="attention-item attention-card static-card">
+    <div class="attention-item attention-card static-card" id="attention-${task.id}">
       <div>
-        <strong>${escapeHtml(task.title)}</strong>
+        <button class="attention-jump" data-task-id="${task.id}">${escapeHtml(task.title)}</button>
         <p>${escapeHtml(task.waitingReason || task.blockedReason || task.description || 'No note yet')}</p>
       </div>
       <div class="attention-meta">
@@ -184,9 +219,10 @@ function attentionCard(task) {
   `;
 }
 
-function renderBoard() {
+function renderBoard(filterColumn = '') {
   const boardEl = document.getElementById('board');
-  boardEl.innerHTML = boardData.columns.map(column => createColumn(column)).join('');
+  const columns = filterColumn ? boardData.columns.filter(column => column.id === filterColumn) : boardData.columns;
+  boardEl.innerHTML = columns.map(column => createColumn(column)).join('');
 }
 
 function createColumn(column) {
