@@ -354,11 +354,60 @@ function cloneDefaultState() {
   return JSON.parse(JSON.stringify(defaultState));
 }
 
+function upgradeData(data) {
+  const upgraded = { ...cloneDefaultState(), ...(data || {}) };
+  upgraded.meta = { ...cloneDefaultState().meta, ...(data?.meta || {}) };
+  upgraded.tasks = upgraded.tasks || {};
+  Object.values(upgraded.tasks).forEach(task => {
+    task.notes = Array.isArray(task.notes) ? task.notes : [];
+    task.tags = Array.isArray(task.tags) ? task.tags : [];
+    task.links = Array.isArray(task.links) ? task.links : [];
+    task.history = Array.isArray(task.history) ? task.history : [];
+  });
+
+  upgraded.metrics = {
+    ...cloneDefaultState().metrics,
+    ...(data?.metrics || {}),
+    apiUsage: { ...cloneDefaultState().metrics.apiUsage, ...(data?.metrics?.apiUsage || {}) },
+    hostedProjects: { ...cloneDefaultState().metrics.hostedProjects, ...(data?.metrics?.hostedProjects || {}) },
+    modelOps: { ...cloneDefaultState().metrics.modelOps, ...(data?.metrics?.modelOps || {}) },
+    revenue: { ...cloneDefaultState().metrics.revenue, ...(data?.metrics?.revenue || {}) }
+  };
+
+  upgraded.projects = (data?.projects || cloneDefaultState().projects).map(project => {
+    if (project.id === 'kanban-server' || project.name === 'Eddie Dashboard') {
+      return {
+        ...project,
+        status: 'live',
+        environment: 'Vercel',
+        url: 'https://workspace-8lu9mgwlp-eddiejordens-projects.vercel.app',
+        notes: 'Primary live dashboard. Use this dark-mode Vercel deployment only.'
+      };
+    }
+    return project;
+  });
+
+  upgraded.github = {
+    ...cloneDefaultState().github,
+    ...(data?.github || {}),
+    repos: (data?.github?.repos || cloneDefaultState().github.repos).map(repo => {
+      if (repo.name === 'eddie-kanban') {
+        return { ...repo, deployUrl: 'https://workspace-8lu9mgwlp-eddiejordens-projects.vercel.app' };
+      }
+      return repo;
+    }),
+    recentActivity: data?.github?.recentActivity || cloneDefaultState().github.recentActivity
+  };
+
+  upgraded.activity = Array.isArray(upgraded.activity) ? upgraded.activity : [];
+  return upgraded;
+}
+
 async function loadData() {
   if (pool) {
     await ensureDb();
     const { rows } = await pool.query('select data from dashboard_state where id = $1 limit 1', [DB_ROW_ID]);
-    if (rows.length && rows[0].data) return rows[0].data;
+    if (rows.length && rows[0].data) return upgradeData(rows[0].data);
     const seeded = cloneDefaultState();
     await pool.query(
       'insert into dashboard_state (id, data, updated_at) values ($1, $2::jsonb, now()) on conflict (id) do update set data = excluded.data, updated_at = now()',
@@ -370,7 +419,7 @@ async function loadData() {
   try {
     if (fs.existsSync(DATA_FILE)) {
       const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-      return JSON.parse(raw);
+      return upgradeData(JSON.parse(raw));
     }
   } catch (err) {
     console.error('Error loading data:', err);
