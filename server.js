@@ -39,6 +39,97 @@ async function notifySlack(message) {
   }
 }
 
+function githubHeaders() {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'eddie-ops-dashboard'
+  };
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+  return headers;
+}
+
+async function githubJson(url) {
+  const response = await fetch(url, { headers: githubHeaders() });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GitHub API ${response.status}: ${text}`);
+  }
+  return response.json();
+}
+
+async function refreshGitHubData(data, force = false) {
+  const existing = data.github || { repos: [], recentActivity: [] };
+  const lastFetched = existing.fetchedAt ? new Date(existing.fetchedAt).getTime() : 0;
+  const staleMs = 15 * 60 * 1000;
+  if (!force && lastFetched && Date.now() - lastFetched < staleMs) {
+    return existing;
+  }
+
+  const repos = await Promise.all((existing.repos || []).map(async repo => {
+    try {
+      const full = `${repo.owner}/${repo.name}`;
+      const repoMeta = await githubJson(`https://api.github.com/repos/${full}`);
+      const prs = await githubJson(`https://api.github.com/repos/${full}/pulls?state=all&per_page=3`);
+      const commits = await githubJson(`https://api.github.com/repos/${full}/commits?per_page=3`);
+
+      const recentPrs = prs.map(pr => ({
+        id: `pr-${repo.name}-${pr.number}`,
+        type: 'pr',
+        title: `PR #${pr.number}: ${pr.title}`,
+        repo: repo.name,
+        url: pr.html_url,
+        updatedAt: pr.updated_at,
+        state: pr.state,
+        author: pr.user?.login || 'unknown'
+      }));
+
+      const recentCommits = commits.map(commit => ({
+        id: `commit-${repo.name}-${commit.sha}`,
+        type: 'commit',
+        title: `${commit.sha.slice(0, 7)} · ${String(commit.commit?.message || '').split('\n')[0]}`,
+        repo: repo.name,
+        url: commit.html_url,
+        updatedAt: commit.commit?.author?.date,
+        author: commit.author?.login || commit.commit?.author?.name || 'unknown'
+      }));
+
+      return {
+        ...repo,
+        branch: repoMeta.default_branch,
+        isPrivate: repoMeta.private,
+        pushedAt: repoMeta.pushed_at,
+        openIssues: repoMeta.open_issues_count,
+        stars: repoMeta.stargazers_count,
+        recentPrs,
+        recentCommits
+      };
+    } catch (error) {
+      return {
+        ...repo,
+        fetchError: error.message,
+        recentPrs: repo.recentPrs || [],
+        recentCommits: repo.recentCommits || []
+      };
+    }
+  }));
+
+  const recentActivity = repos
+    .flatMap(repo => ([...(repo.recentPrs || []), ...(repo.recentCommits || [])]))
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .slice(0, 12);
+
+  data.github = {
+    ...existing,
+    repos,
+    recentActivity,
+    fetchedAt: nowIso()
+  };
+
+  return data.github;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -654,7 +745,13 @@ app.patch('/api/projects/:id', async (req, res) => {
 
 app.get('/api/github', async (req, res) => {
   const data = await loadData();
-  res.json(data.github || {});
+  try {
+    const github = await refreshGitHubData(data, req.query.refresh === '1');
+    await saveData(data);
+    res.json(github || {});
+  } catch (error) {
+    res.status(500).json({ error: error.message, github: data.github || {} });
+  }
 });
 
 app.patch('/api/github', async (req, res) => {

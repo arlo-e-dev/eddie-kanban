@@ -39,9 +39,23 @@ async function loadBoard() {
     if (!response.ok) throw new Error('Failed to load dashboard');
     boardData = await response.json();
     renderDashboard();
+    loadGithubData();
   } catch (error) {
     console.error(error);
     alert('Failed to load dashboard');
+  }
+}
+
+async function loadGithubData(force = false) {
+  try {
+    const response = await fetch(`${API_URL}/api/github${force ? '?refresh=1' : ''}`);
+    if (!response.ok) throw new Error('Failed to load GitHub data');
+    const github = await response.json();
+    boardData.github = github;
+    renderGithub();
+    bindDynamicEvents();
+  } catch (error) {
+    console.error(error);
   }
 }
 
@@ -87,6 +101,10 @@ function bindDynamicEvents() {
       }
     });
   });
+  const refreshGithubBtn = document.getElementById('refresh-github-btn');
+  if (refreshGithubBtn) {
+    refreshGithubBtn.onclick = () => loadGithubData(true);
+  }
 }
 
 function renderSummary() {
@@ -275,6 +293,7 @@ function renderGithub() {
         <p class="section-kicker">GitHub</p>
         <h2>Repos + recent activity</h2>
       </div>
+      <button class="mini-btn" id="refresh-github-btn">Refresh GitHub</button>
     </div>
     <div class="stack-list compact-list">
       ${github.repos.map(repo => {
@@ -286,6 +305,12 @@ function renderGithub() {
               <span class="pill">${escapeHtml(repo.branch || 'main')}</span>
             </div>
             <p>${escapeHtml(repo.notes || '')}</p>
+            <div class="mini-meta">
+              <span>updated ${escapeHtml(formatDate(repo.pushedAt))}</span>
+              <span>${Number(repo.openIssues || 0)} open issues</span>
+              <span>${Number(repo.stars || 0)} ★</span>
+            </div>
+            ${repo.fetchError ? `<div class="info-strip red">GitHub fetch error: ${escapeHtml(repo.fetchError)}</div>` : ''}
             <div class="link-list">
               ${repo.repoUrl ? `<a href="${escapeAttribute(repo.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}
               ${deployUrl ? `<a href="${escapeAttribute(deployUrl)}" target="_blank" rel="noreferrer">Deploy</a>` : ''}
@@ -300,7 +325,8 @@ function renderGithub() {
         ${github.recentActivity.map(item => `
           <li>
             <span class="activity-title">${escapeHtml(item.title)}</span>
-            <a href="${escapeAttribute(item.url || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.repo || 'link')}</a>
+            <span class="activity-time">${escapeHtml(item.repo || '')} · ${escapeHtml(formatDate(item.updatedAt))}</span>
+            <a href="${escapeAttribute(item.url || '#')}" target="_blank" rel="noreferrer">Open</a>
           </li>
         `).join('')}
       </ul>
