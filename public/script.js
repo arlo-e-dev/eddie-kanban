@@ -5,6 +5,7 @@ let editingTaskId = null;
 let sortByPriority = false;
 
 const priorityOrder = { high: 0, medium: 1, low: 2 };
+const liveDeployUrl = 'https://workspace-8yqp6hg7u-eddiejordens-projects.vercel.app';
 
 document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
@@ -53,17 +54,51 @@ function renderDashboard() {
   renderGithub();
   renderMetrics();
   renderActivity();
+  bindDynamicEvents();
+}
+
+function bindDynamicEvents() {
+  document.querySelectorAll('.status-select').forEach(select => {
+    select.addEventListener('change', handleStatusChange);
+  });
+  document.querySelectorAll('.edit-btn').forEach(button => {
+    button.addEventListener('click', () => openTaskModal(button.dataset.taskId));
+  });
+  document.querySelectorAll('.delete-btn').forEach(button => {
+    button.addEventListener('click', () => openDeleteModal(button.dataset.taskId));
+  });
+  document.querySelectorAll('[data-action="mark-done"]').forEach(button => {
+    button.addEventListener('click', () => quickMoveTask(button.dataset.taskId, 'done'));
+  });
+  document.querySelectorAll('[data-action="mark-waiting-eddie"]').forEach(button => {
+    button.addEventListener('click', () => quickMoveTask(button.dataset.taskId, 'waiting-on-eddie'));
+  });
+  document.querySelectorAll('[data-action="mark-in-progress"]').forEach(button => {
+    button.addEventListener('click', () => quickMoveTask(button.dataset.taskId, 'in-progress'));
+  });
+  document.querySelectorAll('[data-action="save-note"]').forEach(button => {
+    button.addEventListener('click', () => saveTaskNote(button.dataset.taskId));
+  });
+  document.querySelectorAll('.note-input').forEach(input => {
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        saveTaskNote(event.target.dataset.taskId);
+      }
+    });
+  });
 }
 
 function renderSummary() {
   const tasks = Object.values(boardData.tasks || {});
+  const metrics = boardData.metrics || {};
   const cards = [
     { label: 'Active work', value: tasks.filter(task => task.columnId === 'in-progress').length, tone: 'blue' },
     { label: 'Waiting on Eddie', value: tasks.filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie').length, tone: 'amber' },
     { label: 'Blocked', value: tasks.filter(task => task.status === 'blocked' || task.columnId === 'blocked').length, tone: 'red' },
     { label: 'Live projects', value: (boardData.projects || []).filter(project => project.status === 'live').length, tone: 'green' },
-    { label: 'API spend', value: `$${Number(boardData.metrics?.apiUsage?.spendUsd || 0).toFixed(2)}`, tone: 'purple' },
-    { label: 'Budget', value: `$${Number(boardData.metrics?.apiUsage?.budgetUsd || 0).toFixed(2)}`, tone: 'slate' }
+    { label: 'Monthly AI burn', value: `$${Number(metrics.modelOps?.estimatedMonthlyUsd || 0).toFixed(0)}`, tone: 'purple' },
+    { label: 'Revenue target', value: `$${Number(metrics.revenue?.targetMonthlyUsd || 0).toFixed(0)}`, tone: 'slate' }
   ];
 
   document.getElementById('summary-grid').innerHTML = cards.map(card => `
@@ -76,30 +111,44 @@ function renderSummary() {
 
 function renderAttentionPanel() {
   const attentionTasks = Object.values(boardData.tasks || {})
-    .filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie' || task.priority === 'high')
+    .filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie' || task.priority === 'high' || task.status === 'blocked')
     .sort((a, b) => priorityOrder[a.priority || 'medium'] - priorityOrder[b.priority || 'medium'])
-    .slice(0, 4);
+    .slice(0, 6);
 
   document.getElementById('attention-panel').innerHTML = `
     <div class="section-header compact">
       <div>
         <p class="section-kicker">Needs attention</p>
-        <h2>Things Eddie should see first</h2>
+        <h2>Quick checkoffs + notes</h2>
       </div>
     </div>
     <div class="attention-list">
-      ${attentionTasks.length ? attentionTasks.map(task => `
-        <div class="attention-item">
-          <div>
-            <strong>${escapeHtml(task.title)}</strong>
-            <p>${escapeHtml(task.waitingReason || task.blockedReason || task.description || 'No note yet')}</p>
-          </div>
-          <div class="attention-meta">
-            <span class="pill ${task.nextActionBy === 'Eddie' ? 'warn' : 'neutral'}">${escapeHtml(task.nextActionBy || 'Arlo')}</span>
-            <span class="pill">${escapeHtml(task.dueText || 'No date')}</span>
-          </div>
-        </div>
-      `).join('') : '<p class="empty-state">Nothing urgent right now.</p>'}
+      ${attentionTasks.length ? attentionTasks.map(task => attentionCard(task)).join('') : '<p class="empty-state">Nothing urgent right now.</p>'}
+    </div>
+  `;
+}
+
+function attentionCard(task) {
+  return `
+    <div class="attention-item attention-card">
+      <div>
+        <strong>${escapeHtml(task.title)}</strong>
+        <p>${escapeHtml(task.waitingReason || task.blockedReason || task.description || 'No note yet')}</p>
+      </div>
+      <div class="attention-meta">
+        <span class="pill ${task.nextActionBy === 'Eddie' ? 'warn' : 'neutral'}">next: ${escapeHtml(task.nextActionBy || 'Arlo')}</span>
+        <span class="pill">${escapeHtml(task.dueText || 'No date')}</span>
+      </div>
+      ${(task.notes || []).length ? `<div class="notes-feed compact">${renderNotes(task.notes, 2)}</div>` : ''}
+      <div class="quick-actions">
+        <button class="mini-btn success" data-action="mark-done" data-task-id="${task.id}">✓ Done</button>
+        <button class="mini-btn" data-action="mark-in-progress" data-task-id="${task.id}">↻ Arlo on it</button>
+        <button class="mini-btn warn" data-action="mark-waiting-eddie" data-task-id="${task.id}">⏸ Waiting on Eddie</button>
+      </div>
+      <div class="note-composer">
+        <textarea class="note-input" data-task-id="${task.id}" rows="2" placeholder="Leave a note for this item. Example: actually waiting on vendor, not me."></textarea>
+        <button class="mini-btn primary" data-action="save-note" data-task-id="${task.id}">Add note</button>
+      </div>
     </div>
   `;
 }
@@ -107,16 +156,6 @@ function renderAttentionPanel() {
 function renderBoard() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = boardData.columns.map(column => createColumn(column)).join('');
-
-  document.querySelectorAll('.status-select').forEach(select => {
-    select.addEventListener('change', handleStatusChange);
-  });
-  document.querySelectorAll('.edit-btn').forEach(button => {
-    button.addEventListener('click', () => openTaskModal(button.dataset.taskId));
-  });
-  document.querySelectorAll('.delete-btn').forEach(button => {
-    button.addEventListener('click', () => openDeleteModal(button.dataset.taskId));
-  });
 }
 
 function createColumn(column) {
@@ -162,8 +201,13 @@ function createTaskCard(task) {
       </div>
 
       ${task.links?.length ? `<div class="link-list">${task.links.map(link => `<a href="${escapeAttribute(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join('')}</div>` : ''}
-
+      ${(task.notes || []).length ? `<div class="notes-feed">${renderNotes(task.notes, 3)}</div>` : ''}
       ${historyItems ? `<ul class="history-snippet">${historyItems}</ul>` : ''}
+
+      <div class="note-composer compact">
+        <textarea class="note-input" data-task-id="${task.id}" rows="2" placeholder="Add note"></textarea>
+        <button class="mini-btn primary" data-action="save-note" data-task-id="${task.id}">Add note</button>
+      </div>
 
       <div class="task-controls">
         <select class="status-select" data-task-id="${task.id}">
@@ -177,8 +221,23 @@ function createTaskCard(task) {
   `;
 }
 
+function renderNotes(notes, limit = 3) {
+  return notes.slice(0, limit).map(note => `
+    <div class="note-item">
+      <div class="note-meta">${escapeHtml(note.author || 'Unknown')} · ${formatDate(note.createdAt)}</div>
+      <div class="note-body">${escapeHtml(note.text || '')}</div>
+    </div>
+  `).join('');
+}
+
 function renderProjects() {
-  const projects = boardData.projects || [];
+  const projects = (boardData.projects || []).map(project => {
+    if (project.id === 'kanban-server' || project.name === 'Eddie Dashboard') {
+      return { ...project, status: 'live', url: liveDeployUrl, notes: 'Primary live dashboard. Dark-mode Vercel deployment only.' };
+    }
+    return project;
+  });
+
   document.getElementById('projects-panel').innerHTML = `
     <div class="section-header compact">
       <div>
@@ -218,19 +277,22 @@ function renderGithub() {
       </div>
     </div>
     <div class="stack-list compact-list">
-      ${github.repos.map(repo => `
-        <article class="list-card">
-          <div class="list-card-header">
-            <strong>${escapeHtml(repo.owner)}/${escapeHtml(repo.name)}</strong>
-            <span class="pill">${escapeHtml(repo.branch || 'main')}</span>
-          </div>
-          <p>${escapeHtml(repo.notes || '')}</p>
-          <div class="link-list">
-            ${repo.repoUrl ? `<a href="${escapeAttribute(repo.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}
-            ${repo.deployUrl ? `<a href="${escapeAttribute(repo.deployUrl)}" target="_blank" rel="noreferrer">Deploy</a>` : ''}
-          </div>
-        </article>
-      `).join('')}
+      ${github.repos.map(repo => {
+        const deployUrl = repo.name === 'eddie-kanban' ? liveDeployUrl : repo.deployUrl;
+        return `
+          <article class="list-card">
+            <div class="list-card-header">
+              <strong>${escapeHtml(repo.owner)}/${escapeHtml(repo.name)}</strong>
+              <span class="pill">${escapeHtml(repo.branch || 'main')}</span>
+            </div>
+            <p>${escapeHtml(repo.notes || '')}</p>
+            <div class="link-list">
+              ${repo.repoUrl ? `<a href="${escapeAttribute(repo.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}
+              ${deployUrl ? `<a href="${escapeAttribute(deployUrl)}" target="_blank" rel="noreferrer">Deploy</a>` : ''}
+            </div>
+          </article>
+        `;
+      }).join('')}
     </div>
     <div class="subsection">
       <h3>Recent history</h3>
@@ -247,42 +309,28 @@ function renderGithub() {
 }
 
 function renderMetrics() {
-  const apiUsage = boardData.metrics?.apiUsage || {};
-  const hosted = boardData.metrics?.hostedProjects || {};
+  const metrics = boardData.metrics || {};
+  const apiUsage = metrics.apiUsage || {};
+  const hosted = metrics.hostedProjects || {};
+  const modelOps = metrics.modelOps || {};
+  const revenue = metrics.revenue || {};
+
   document.getElementById('metrics-panel').innerHTML = `
     <div class="section-header compact">
       <div>
         <p class="section-kicker">Ops metrics</p>
-        <h2>Usage + infrastructure snapshot</h2>
+        <h2>Costs + targets</h2>
       </div>
     </div>
     <div class="metrics-grid">
-      <div class="metric-box">
-        <span>Period</span>
-        <strong>${escapeHtml(apiUsage.periodLabel || 'Today')}</strong>
-      </div>
-      <div class="metric-box">
-        <span>Spend</span>
-        <strong>$${Number(apiUsage.spendUsd || 0).toFixed(2)}</strong>
-      </div>
-      <div class="metric-box">
-        <span>Budget</span>
-        <strong>$${Number(apiUsage.budgetUsd || 0).toFixed(2)}</strong>
-      </div>
-      <div class="metric-box">
-        <span>Live apps</span>
-        <strong>${Number(hosted.live || 0)}</strong>
-      </div>
-      <div class="metric-box">
-        <span>Building</span>
-        <strong>${Number(hosted.building || 0)}</strong>
-      </div>
-      <div class="metric-box">
-        <span>Issues</span>
-        <strong>${Number(hosted.issues || 0)}</strong>
-      </div>
+      <div class="metric-box"><span>OpenAI subscription</span><strong>$${Number(modelOps.chatgptSubscriptionUsd || 0).toFixed(0)}</strong></div>
+      <div class="metric-box"><span>Anthropic/API est</span><strong>$${Number(modelOps.anthropicApiEstimateUsd || 0).toFixed(0)}</strong></div>
+      <div class="metric-box"><span>Qwen energy est</span><strong>$${Number(modelOps.qwenEnergyEstimateUsd || 0).toFixed(0)}</strong></div>
+      <div class="metric-box"><span>Total monthly AI burn</span><strong>$${Number(modelOps.estimatedMonthlyUsd || 0).toFixed(0)}</strong></div>
+      <div class="metric-box"><span>Live apps</span><strong>${Number(hosted.live || 0)}</strong></div>
+      <div class="metric-box"><span>Revenue target</span><strong>$${Number(revenue.targetMonthlyUsd || 0).toFixed(0)}</strong></div>
     </div>
-    <p class="panel-note">${escapeHtml(apiUsage.note || '')}</p>
+    <p class="panel-note">${escapeHtml(modelOps.note || apiUsage.note || '')}</p>
   `;
 }
 
@@ -311,7 +359,10 @@ async function handleStatusChange(event) {
   const toColumn = event.target.value;
   event.target.value = '';
   if (!taskId || !toColumn) return;
+  await quickMoveTask(taskId, toColumn);
+}
 
+async function quickMoveTask(taskId, toColumn) {
   try {
     const response = await fetch(`${API_URL}/api/tasks/${taskId}/move`, {
       method: 'PUT',
@@ -323,6 +374,27 @@ async function handleStatusChange(event) {
   } catch (error) {
     console.error(error);
     alert('Failed to move task');
+  }
+}
+
+async function saveTaskNote(taskId) {
+  const input = document.querySelector(`.note-input[data-task-id="${taskId}"]`);
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+
+  try {
+    const response = await fetch(`${API_URL}/api/tasks/${taskId}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, author: 'Eddie' })
+    });
+    if (!response.ok) throw new Error('Failed to save note');
+    input.value = '';
+    await loadBoard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to save note');
   }
 }
 

@@ -75,6 +75,7 @@ function seedTask({
   dueText = '',
   tags = [],
   links = [],
+  notes = [],
   createdBy = 'Arlo',
   history = []
 }) {
@@ -93,6 +94,7 @@ function seedTask({
     dueText,
     tags,
     links,
+    notes,
     createdBy,
     createdAt,
     updatedAt: createdAt,
@@ -213,12 +215,12 @@ const defaultState = (() => {
       {
         id: 'kanban-server',
         name: 'Eddie Dashboard',
-        status: 'building',
+        status: 'live',
         environment: 'Vercel',
         owner: 'Arlo',
-        url: '',
+        url: 'https://workspace-8yqp6hg7u-eddiejordens-projects.vercel.app',
         repoUrl: 'https://github.com/arlo-e-dev/eddie-kanban',
-        notes: 'Upgraded from simple board into org dashboard.',
+        notes: 'Primary live dashboard. Use this dark-mode Vercel deployment only.',
         updatedAt: nowIso()
       },
       {
@@ -241,7 +243,7 @@ const defaultState = (() => {
           owner: 'arlo-e-dev',
           branch: 'main',
           repoUrl: 'https://github.com/arlo-e-dev/eddie-kanban',
-          deployUrl: '',
+          deployUrl: 'https://workspace-8yqp6hg7u-eddiejordens-projects.vercel.app',
           notes: 'Ops dashboard repo'
         },
         {
@@ -284,17 +286,29 @@ const defaultState = (() => {
     },
     metrics: {
       apiUsage: {
-        periodLabel: 'Today',
-        spendUsd: 0,
-        budgetUsd: 10,
-        status: 'tracking-soon',
-        note: 'Layout ready. Hook real usage source into this section next.'
+        periodLabel: 'Month (estimated)',
+        spendUsd: 425,
+        budgetUsd: 1000,
+        status: 'estimated',
+        note: 'Estimated monthly model/tooling burn. Replace with live telemetry next.'
       },
       hostedProjects: {
         total: 3,
-        live: 2,
-        building: 1,
+        live: 3,
+        building: 0,
         issues: 0
+      },
+      modelOps: {
+        chatgptSubscriptionUsd: 200,
+        anthropicApiEstimateUsd: 150,
+        qwenEnergyEstimateUsd: 75,
+        estimatedMonthlyUsd: 425,
+        note: 'Current estimate: $200 ChatGPT subscription + ~$150 Anthropic/API usage + ~$75 Qwen cluster energy. These are editable estimates until live usage/power telemetry is wired in.'
+      },
+      revenue: {
+        targetMonthlyUsd: 5000,
+        collectedMonthlyUsd: 0,
+        note: 'Initial target placeholder so investment burn can be compared against near-term business goals.'
       }
     },
     activity
@@ -320,6 +334,7 @@ function normalizeTaskInput(input = {}, existingTask = null) {
     dueText: input.dueText ?? base.dueText ?? '',
     tags: normalizeTextList(input.tags ?? base.tags),
     links: normalizeTextList(input.links ?? base.links),
+    notes: Array.isArray(base.notes) ? base.notes : [],
     history: Array.isArray(base.history) ? base.history : []
   };
 }
@@ -414,7 +429,9 @@ function summaryFromBoard(data) {
     liveProjects: (data.projects || []).filter(project => project.status === 'live').length,
     totalProjects: (data.projects || []).length,
     spendUsd: data.metrics?.apiUsage?.spendUsd || 0,
-    budgetUsd: data.metrics?.apiUsage?.budgetUsd || 0
+    budgetUsd: data.metrics?.apiUsage?.budgetUsd || 0,
+    estimatedMonthlyUsd: data.metrics?.modelOps?.estimatedMonthlyUsd || 0,
+    revenueTargetUsd: data.metrics?.revenue?.targetMonthlyUsd || 0
   };
 }
 
@@ -610,7 +627,9 @@ app.patch('/api/metrics', async (req, res) => {
     ...data.metrics,
     ...req.body,
     apiUsage: { ...(data.metrics?.apiUsage || {}), ...(req.body.apiUsage || {}) },
-    hostedProjects: { ...(data.metrics?.hostedProjects || {}), ...(req.body.hostedProjects || {}) }
+    hostedProjects: { ...(data.metrics?.hostedProjects || {}), ...(req.body.hostedProjects || {}) },
+    modelOps: { ...(data.metrics?.modelOps || {}), ...(req.body.modelOps || {}) },
+    revenue: { ...(data.metrics?.revenue || {}), ...(req.body.revenue || {}) }
   };
   pushActivity(data, 'Metrics updated.', 'metric');
   await saveData(data);
@@ -620,6 +639,35 @@ app.patch('/api/metrics', async (req, res) => {
 app.get('/api/activity', async (req, res) => {
   const data = await loadData();
   res.json(data.activity || []);
+});
+
+app.post('/api/tasks/:id/notes', async (req, res) => {
+  const data = await loadData();
+  const { id } = req.params;
+  const task = data.tasks[id];
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+
+  const text = (req.body.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Note text is required' });
+  if (/api[_ -]?key|token|secret|password/i.test(text)) {
+    return res.status(400).json({ error: 'Do not store secrets or tokens in dashboard notes' });
+  }
+
+  const note = {
+    id: `note-${Date.now()}`,
+    text,
+    author: req.body.author || 'Unknown',
+    createdAt: nowIso()
+  };
+
+  task.notes = [note, ...(task.notes || [])].slice(0, 20);
+  task.updatedAt = nowIso();
+  task.history = [createHistoryEvent('note', `Note added by ${note.author}`, { noteId: note.id }), ...(task.history || [])].slice(0, 30);
+  pushActivity(data, `Note added to task: ${task.title}`, 'note', { taskId: id, author: note.author });
+  await saveData(data);
+  await notifySlack(`📝 Dashboard note on "${task.title}" from ${note.author}`);
+
+  res.json({ success: true, task, note });
 });
 
 app.post('/api/reset', async (req, res) => {

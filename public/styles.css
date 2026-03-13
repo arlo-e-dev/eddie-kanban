@@ -517,6 +517,90 @@ button:focus {
   }
 }
 
+.quick-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mini-btn {
+  min-height: 36px;
+  padding: 0.55rem 0.8rem;
+  border-radius: 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+}
+
+.mini-btn.primary {
+  background: var(--blue);
+  color: white;
+}
+
+.mini-btn.success {
+  background: rgba(34, 197, 94, 0.14);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.mini-btn.warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.note-composer {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.note-composer.compact {
+  margin-bottom: 0.75rem;
+}
+
+.note-input {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  background: #0f151c;
+  color: var(--text);
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+}
+
+.notes-feed {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.notes-feed.compact {
+  margin-top: 0;
+}
+
+.note-item {
+  background: #10161f;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+}
+
+.note-meta {
+  color: var(--muted-2);
+  font-size: 0.72rem;
+  margin-bottom: 0.25rem;
+}
+
+.note-body {
+  color: var(--text);
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+
+.attention-card {
+  background: var(--panel-2);
+}
+
 @media (max-width: 799px) {
   .board {
     grid-template-columns: 1fr;
