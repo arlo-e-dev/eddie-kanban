@@ -15,6 +15,13 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupEventListeners() {
   document.getElementById('add-task-btn').addEventListener('click', () => openTaskModal());
   document.getElementById('refresh-btn').addEventListener('click', loadBoard);
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.href = '/login';
+    });
+  }
   document.getElementById('close-modal').addEventListener('click', closeTaskModal);
   document.getElementById('cancel-btn').addEventListener('click', closeTaskModal);
   document.getElementById('task-form').addEventListener('submit', handleTaskSubmit);

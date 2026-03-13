@@ -77,6 +77,37 @@ button { border: 1px solid var(--border); padding: 0.8rem 1rem; cursor: pointer;
 button:hover { transform: translateY(-1px); }
 .btn-primary { background: var(--blue); color: white; border-color: #3b6fd6; }
 .btn-secondary { background: var(--panel-2); color: var(--text); }
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-card {
+  width: min(460px, 100%);
+}
+.login-form {
+  margin-top: 1rem;
+}
+.remember-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+.login-error {
+  color: #fca5a5;
+  min-height: 1.25rem;
+  margin-top: 0.75rem;
+}
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}
+#logout-btn {
+  margin-left: auto;
+}
 .btn-danger { background: #3a1717; color: #fecaca; border-color: #7f1d1d; }
 
 .summary-grid, .metrics-grid, .dashboard-grid { display: grid; gap: 1rem; }

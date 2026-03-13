@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Login</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container login-shell">
+    <section class="panel login-card section-hero">
+      <p class="eyebrow">Protected dashboard</p>
+      <h1>Eddie Ops Dashboard</h1>
+      <p class="hero-copy">Sign in once, then stay signed in with a long-lived secure browser cookie.</p>
+      <form id="login-form" class="login-form">
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" autocomplete="current-password" required>
+        </div>
+        <label class="remember-row">
+          <input type="checkbox" id="remember" checked>
+          <span>Keep this browser signed in</span>
+        </label>
+        <button type="submit" class="btn-primary">Unlock dashboard</button>
+        <p id="login-error" class="login-error"></p>
+      </form>
+    </section>
+  </div>
+  <script>
+    const form = document.getElementById('login-form');
+    const errorEl = document.getElementById('login-error');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorEl.textContent = '';
+      const password = document.getElementById('password').value;
+      const remember = document.getElementById('remember').checked;
+      const response = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password, remember })
+      });
+      if (response.ok) {
+        window.location.href = '/';
+        return;
+      }
+      const data = await response.json().catch(() => ({}));
+      errorEl.textContent = data.error || 'Login failed';
+    });
+  </script>
+</body>
+</html>

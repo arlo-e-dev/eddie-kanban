@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const cookie = require('cookie');
 const { Pool } = require('pg');
 
 const app = express();
@@ -9,6 +11,9 @@ const PORT = process.env.PORT || 3001;
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const DATABASE_URL = process.env.DATABASE_URL;
 const isVercel = !!process.env.VERCEL;
+const SESSION_SECRET = process.env.SESSION_SECRET || '';
+const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || '';
+const AUTH_ENABLED = !!(SESSION_SECRET && DASHBOARD_PASSWORD);
 
 const DATA_DIR = process.env.NODE_ENV === 'production' ? '/data' : __dirname;
 const DATA_FILE = path.join(DATA_DIR, 'board-data.json');
@@ -17,6 +22,55 @@ const DB_ROW_ID = 'main';
 
 app.use(cors());
 app.use(express.json());
+
+function signSession(payload) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function verifySession(token) {
+  if (!token || !SESSION_SECRET) return null;
+  const [body, sig] = token.split('.');
+  if (!body || !sig) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+  if (payload.exp && Date.now() > payload.exp) return null;
+  return payload;
+}
+
+function sessionCookieOptions(maxAgeMs) {
+  return {
+    httpOnly: true,
+    secure: isVercel,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: Math.floor(maxAgeMs / 1000)
+  };
+}
+
+function parseCookies(req) {
+  return cookie.parse(req.headers.cookie || '');
+}
+
+function authMiddleware(req, res, next) {
+  if (!AUTH_ENABLED) return next();
+  if (req.path === '/login' || req.path === '/auth/login' || req.path === '/auth/logout' || req.path.startsWith('/styles.css')) return next();
+  if (req.path === '/script.js') return next();
+  const cookies = parseCookies(req);
+  const session = verifySession(cookies.dashboard_session);
+  if (session) {
+    req.session = session;
+    return next();
+  }
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  return res.redirect('/login');
+}
+
+app.use(authMiddleware);
 app.use(express.static(FRONTEND_PATH));
 
 const pool = DATABASE_URL
@@ -580,6 +634,35 @@ async function withBoard(mutator) {
   const result = await mutator(data);
   return result;
 }
+
+app.get('/login', (req, res) => {
+  if (!AUTH_ENABLED) return res.redirect('/');
+  const cookies = parseCookies(req);
+  const session = verifySession(cookies.dashboard_session);
+  if (session) return res.redirect('/');
+  res.sendFile(path.join(FRONTEND_PATH, 'login.html'));
+});
+
+app.post('/auth/login', async (req, res) => {
+  if (!AUTH_ENABLED) return res.json({ success: true, disabled: true });
+  const { password, remember } = req.body || {};
+  if (password !== DASHBOARD_PASSWORD) {
+    return res.status(401).json({ error: 'Invalid password' });
+  }
+  const maxAgeMs = remember ? 1000 * 60 * 60 * 24 * 30 : 1000 * 60 * 60 * 12;
+  const token = signSession({ sub: 'eddie', exp: Date.now() + maxAgeMs });
+  res.setHeader('Set-Cookie', cookie.serialize('dashboard_session', token, sessionCookieOptions(maxAgeMs)));
+  res.json({ success: true });
+});
+
+app.post('/auth/logout', (req, res) => {
+  res.setHeader('Set-Cookie', cookie.serialize('dashboard_session', '', { httpOnly: true, secure: isVercel, sameSite: 'lax', path: '/', maxAge: 0 }));
+  res.json({ success: true });
+});
+
+app.get('/api/session', (req, res) => {
+  res.json({ authenticated: !!req.session, authEnabled: AUTH_ENABLED });
+});
 
 app.get('/api/board', async (req, res) => {
   res.json(await loadData());
