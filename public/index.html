@@ -8,11 +8,11 @@
 </head>
 <body>
   <div class="container">
-    <header class="hero">
+    <header class="hero section-hero">
       <div>
         <p class="eyebrow">Mobile-first org view</p>
         <h1>Eddie Ops Dashboard</h1>
-        <p class="hero-copy">One glance for active work, handoffs, hosted projects, GitHub links, and API spend placeholders.</p>
+        <p class="hero-copy">One glance for active work, handoffs, hosted projects, GitHub links, and model spend.</p>
       </div>
       <div class="header-controls">
         <button id="add-task-btn" class="btn-primary">➕ Add Task</button>
@@ -22,9 +22,9 @@
 
     <section class="summary-grid" id="summary-grid"></section>
 
-    <section class="panel attention-panel" id="attention-panel"></section>
+    <section class="panel attention-panel section-attention" id="attention-panel"></section>
 
-    <section class="panel">
+    <section class="panel section-kanban">
       <div class="section-header">
         <div>
           <p class="section-kicker">Task system</p>
@@ -38,11 +38,14 @@
       <div class="board" id="board"></div>
     </section>
 
-    <section class="dashboard-grid">
-      <section class="panel" id="projects-panel"></section>
-      <section class="panel" id="github-panel"></section>
-      <section class="panel" id="metrics-panel"></section>
-      <section class="panel" id="activity-panel"></section>
+    <section class="dashboard-grid dashboard-grid-top">
+      <section class="panel section-metrics section-tall" id="metrics-panel"></section>
+      <section class="panel section-projects section-tall" id="projects-panel"></section>
+    </section>
+
+    <section class="dashboard-grid dashboard-grid-bottom">
+      <section class="panel section-github section-wide" id="github-panel"></section>
+      <section class="panel section-activity section-narrow" id="activity-panel"></section>
     </section>
 
     <div id="task-modal" class="modal">
