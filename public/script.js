@@ -5,7 +5,7 @@ let editingTaskId = null;
 let sortByPriority = false;
 
 const priorityOrder = { high: 0, medium: 1, low: 2 };
-const liveDeployUrl = 'https://workspace-nyu2zhabv-eddiejordens-projects.vercel.app';
+const liveDeployUrl = 'https://workspace-nine-lemon-81.vercel.app';
 
 document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();

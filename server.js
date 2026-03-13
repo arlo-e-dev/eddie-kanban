@@ -363,7 +363,7 @@ const defaultState = (() => {
         status: 'live',
         environment: 'Vercel',
         owner: 'Arlo',
-        url: 'https://workspace-8yqp6hg7u-eddiejordens-projects.vercel.app',
+        url: 'https://workspace-nine-lemon-81.vercel.app',
         repoUrl: 'https://github.com/arlo-e-dev/eddie-kanban',
         notes: 'Primary live dashboard. Use this dark-mode Vercel deployment only.',
         updatedAt: nowIso()
@@ -388,7 +388,7 @@ const defaultState = (() => {
           owner: 'arlo-e-dev',
           branch: 'main',
           repoUrl: 'https://github.com/arlo-e-dev/eddie-kanban',
-          deployUrl: 'https://workspace-8yqp6hg7u-eddiejordens-projects.vercel.app',
+          deployUrl: 'https://workspace-nine-lemon-81.vercel.app',
           notes: 'Ops dashboard repo'
         },
         {
@@ -525,7 +525,7 @@ function upgradeData(data) {
         ...project,
         status: 'live',
         environment: 'Vercel',
-        url: 'https://workspace-8lu9mgwlp-eddiejordens-projects.vercel.app',
+        url: 'https://workspace-nine-lemon-81.vercel.app',
         notes: 'Primary live dashboard. Use this dark-mode Vercel deployment only.'
       };
     }
@@ -537,7 +537,7 @@ function upgradeData(data) {
     ...(data?.github || {}),
     repos: (data?.github?.repos || cloneDefaultState().github.repos).map(repo => {
       if (repo.name === 'eddie-kanban') {
-        return { ...repo, deployUrl: 'https://workspace-8lu9mgwlp-eddiejordens-projects.vercel.app' };
+        return { ...repo, deployUrl: 'https://workspace-nine-lemon-81.vercel.app' };
       }
       return repo;
     }),

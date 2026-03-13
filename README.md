@@ -114,7 +114,7 @@ That means the dashboard can stay persistent on Vercel without relying on epheme
 ## Current deployment
 
 - Vercel project: `workspace`
-- Production URL: `https://workspace-mzi64vuwu-eddiejordens-projects.vercel.app`
+- Production URL: `https://workspace-nine-lemon-81.vercel.app`
 - Deployment protection is enabled on Vercel, so authenticated viewing still follows your project protection rules.
 
 ## Next logical upgrades
