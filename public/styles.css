@@ -70,7 +70,7 @@ body {
 }
 .hero h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin-top: 0.2rem; }
 .hero-copy, .panel-note, .list-card p, .task-description, .attention-item p, .activity-time, .mini-meta, .task-subline, .summary-label, .empty-state, .graph-caption { color: var(--muted); }
-.header-controls, .form-actions, .task-controls, .task-meta, .link-list, .attention-meta, .mini-meta, .quick-actions { display: flex; gap: 0.65rem; flex-wrap: wrap; }
+.header-controls, .form-actions, .task-controls, .task-meta, .link-list, .attention-meta, .mini-meta, .quick-actions, .attention-controls { display: flex; gap: 0.65rem; flex-wrap: wrap; }
 button, select, input, textarea { font: inherit; }
 button, .btn-primary, .btn-secondary, .btn-danger, select, input, textarea { min-height: 44px; border-radius: 12px; }
 button { border: 1px solid var(--border); padding: 0.8rem 1rem; cursor: pointer; transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease; }
@@ -145,6 +145,22 @@ button:hover { transform: translateY(-1px); }
 .activity-list li { display: grid; gap: 0.25rem; border-bottom: 1px solid var(--border); padding-bottom: 0.7rem; }
 .subsection { margin-top: 1rem; }
 .note-composer { display: grid; gap: 0.5rem; margin-top: 0.75rem; }
+.attention-controls {
+  margin-top: 0.25rem;
+}
+.attention-controls select,
+.attention-controls input {
+  flex: 1 1 140px;
+  min-height: 40px;
+  border: 1px solid var(--border-strong);
+  background: #0f151c;
+  color: var(--text);
+  padding: 0.7rem 0.8rem;
+  border-radius: 10px;
+}
+.attention-controls select {
+  cursor: pointer;
+}
 .note-composer.compact { margin-bottom: 0.75rem; }
 .notes-feed { display: grid; gap: 0.5rem; margin-top: 0.75rem; }
 .notes-feed.compact { margin-top: 0; }

@@ -86,6 +86,19 @@ function bindDynamicEvents() {
       }
     });
   });
+  document.querySelectorAll('.attention-lane-select').forEach(select => {
+    select.addEventListener('change', event => {
+      const { taskId } = event.target.dataset;
+      const toColumn = event.target.value;
+      if (taskId && toColumn) quickMoveTask(taskId, toColumn);
+    });
+  });
+  document.querySelectorAll('.attention-assignee-input').forEach(input => {
+    input.addEventListener('change', event => updateAttentionTask(event.target.dataset.taskId));
+  });
+  document.querySelectorAll('.attention-next-action-select').forEach(select => {
+    select.addEventListener('change', event => updateAttentionTask(event.target.dataset.taskId));
+  });
   const refreshGithubBtn = document.getElementById('refresh-github-btn');
   if (refreshGithubBtn) refreshGithubBtn.onclick = () => loadGithubData(true);
 }
@@ -146,6 +159,15 @@ function attentionCard(task) {
         <button class="mini-btn success" data-action="mark-done" data-task-id="${task.id}">✓ Done</button>
         <button class="mini-btn" data-action="mark-in-progress" data-task-id="${task.id}">↻ Arlo on it</button>
         <button class="mini-btn warn" data-action="mark-waiting-eddie" data-task-id="${task.id}">⏸ Waiting on Eddie</button>
+      </div>
+      <div class="attention-controls">
+        <select class="attention-lane-select" data-task-id="${task.id}">
+          ${boardData.columns.map(column => `<option value="${column.id}" ${column.id === task.columnId ? 'selected' : ''}>${column.title}</option>`).join('')}
+        </select>
+        <input class="attention-assignee-input" data-task-id="${task.id}" value="${escapeAttribute(task.assignee || '')}" placeholder="Assign to...">
+        <select class="attention-next-action-select" data-task-id="${task.id}">
+          ${['Arlo', 'Eddie', 'External'].map(owner => `<option value="${owner}" ${task.nextActionBy === owner ? 'selected' : ''}>Next: ${owner}</option>`).join('')}
+        </select>
       </div>
       <div class="note-composer">
         <textarea class="note-input" data-task-id="${task.id}" rows="2" placeholder="Leave a note for this item"></textarea>
@@ -449,6 +471,28 @@ async function saveTaskNote(taskId) {
   } catch (error) {
     console.error(error);
     alert('Failed to save note');
+  }
+}
+
+async function updateAttentionTask(taskId) {
+  const assigneeInput = document.querySelector(`.attention-assignee-input[data-task-id="${taskId}"]`);
+  const nextActionSelect = document.querySelector(`.attention-next-action-select[data-task-id="${taskId}"]`);
+  if (!assigneeInput || !nextActionSelect) return;
+
+  try {
+    const response = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        assignee: assigneeInput.value.trim(),
+        nextActionBy: nextActionSelect.value
+      })
+    });
+    if (!response.ok) throw new Error('Failed to update task');
+    await loadBoard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to update task');
   }
 }
 
