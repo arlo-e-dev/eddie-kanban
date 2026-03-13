@@ -1,123 +1,149 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kanban Board - Eddie's Projects</title>
-    <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eddie Ops Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🦞 Kanban Board</h1>
-            <div class="header-controls">
-                <button id="add-task-btn" class="btn-primary">➕ Add Task</button>
-                <label class="sort-toggle">
-                    <input type="checkbox" id="sort-priority">
-                    <span>Sort by Priority</span>
-                </label>
-            </div>
-        </header>
+  <div class="container">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Mobile-first org view</p>
+        <h1>Eddie Ops Dashboard</h1>
+        <p class="hero-copy">One glance for active work, handoffs, hosted projects, GitHub links, and API spend placeholders.</p>
+      </div>
+      <div class="header-controls">
+        <button id="add-task-btn" class="btn-primary">➕ Add Task</button>
+        <button id="refresh-btn" class="btn-secondary">↻ Refresh</button>
+      </div>
+    </header>
 
-        <div class="board" id="board">
-            <!-- Columns will be dynamically generated -->
-        </div>
+    <section class="summary-grid" id="summary-grid"></section>
 
-        <!-- Add/Edit Task Modal -->
-        <div id="task-modal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h2 id="modal-title">Add New Task</h2>
-                    <button class="close-btn" id="close-modal">✕</button>
-                </div>
-                <form id="task-form">
-                    <input type="hidden" id="task-id">
-                    
-                    <div class="form-group">
-                        <label for="task-title">Title *</label>
-                        <input type="text" id="task-title" required>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="task-description">Description</label>
-                        <textarea id="task-description" rows="3"></textarea>
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="task-priority">Priority</label>
-                            <select id="task-priority">
-                                <option value="low">🟢 Low</option>
-                                <option value="medium" selected>🟡 Medium</option>
-                                <option value="high">🔴 High</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="task-assignee">Assignee</label>
-                            <input type="text" id="task-assignee" placeholder="e.g., Eddie">
-                        </div>
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="task-model">Model</label>
-                            <input type="text" id="task-model" placeholder="e.g., Sonnet 4.5">
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="task-agent-type">Agent Type</label>
-                            <select id="task-agent-type">
-                                <option value="">None</option>
-                                <option value="main">Main Agent</option>
-                                <option value="subagent">Sub-agent</option>
-                                <option value="isolated">Isolated Agent</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="task-subagent-id">Sub-agent ID</label>
-                        <input type="text" id="task-subagent-id" placeholder="e.g., 2dd55328-a84a...">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="task-request-status">Request Status</label>
-                        <select id="task-request-status">
-                            <option value="">Not Started</option>
-                            <option value="pending">⏳ Pending</option>
-                            <option value="in-progress">🔄 In Progress</option>
-                            <option value="completed">✅ Completed</option>
-                            <option value="blocked">🚫 Blocked</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="task-eta">Estimated Completion (minutes)</label>
-                        <input type="number" id="task-eta" min="0" placeholder="e.g., 120">
-                    </div>
-                    
-                    <div class="form-actions">
-                        <button type="button" class="btn-secondary" id="cancel-btn">Cancel</button>
-                        <button type="submit" class="btn-primary">Save Task</button>
-                    </div>
-                </form>
-            </div>
-        </div>
+    <section class="panel attention-panel" id="attention-panel"></section>
 
-        <!-- Confirm Delete Modal -->
-        <div id="delete-modal" class="modal">
-            <div class="modal-content modal-small">
-                <h2>Delete Task?</h2>
-                <p id="delete-task-name"></p>
-                <div class="form-actions">
-                    <button type="button" class="btn-secondary" id="cancel-delete">Cancel</button>
-                    <button type="button" class="btn-danger" id="confirm-delete">Delete</button>
-                </div>
-            </div>
+    <section class="panel">
+      <div class="section-header">
+        <div>
+          <p class="section-kicker">Task system</p>
+          <h2>Kanban + handoff lanes</h2>
         </div>
+        <label class="sort-toggle">
+          <input type="checkbox" id="sort-priority">
+          <span>Sort by priority</span>
+        </label>
+      </div>
+      <div class="board" id="board"></div>
+    </section>
+
+    <section class="dashboard-grid">
+      <section class="panel" id="projects-panel"></section>
+      <section class="panel" id="github-panel"></section>
+      <section class="panel" id="metrics-panel"></section>
+      <section class="panel" id="activity-panel"></section>
+    </section>
+
+    <div id="task-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 id="modal-title">Add Task</h2>
+          <button class="close-btn" id="close-modal">✕</button>
+        </div>
+        <form id="task-form">
+          <div class="form-group">
+            <label for="task-title">Title *</label>
+            <input type="text" id="task-title" required>
+          </div>
+
+          <div class="form-group">
+            <label for="task-description">Description</label>
+            <textarea id="task-description" rows="3"></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="task-column">Lane</label>
+              <select id="task-column">
+                <option value="todo">Queued</option>
+                <option value="waiting-on-eddie">Waiting on Eddie</option>
+                <option value="in-progress">In Progress</option>
+                <option value="blocked">Blocked</option>
+                <option value="done">Done</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="task-priority">Priority</label>
+              <select id="task-priority">
+                <option value="low">🟢 Low</option>
+                <option value="medium">🟡 Medium</option>
+                <option value="high">🔴 High</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="task-assignee">Assignee</label>
+              <input type="text" id="task-assignee" placeholder="Arlo, Eddie, External...">
+            </div>
+            <div class="form-group">
+              <label for="task-next-action">Next action by</label>
+              <select id="task-next-action">
+                <option value="Arlo">Arlo</option>
+                <option value="Eddie">Eddie</option>
+                <option value="External">External</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="task-due-text">Due / timing note</label>
+              <input type="text" id="task-due-text" placeholder="Today, This week, After call...">
+            </div>
+            <div class="form-group">
+              <label for="task-tags">Tags</label>
+              <input type="text" id="task-tags" placeholder="comma, separated, tags">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="task-links">Links</label>
+            <input type="text" id="task-links" placeholder="https://..., https://...">
+          </div>
+
+          <div class="form-group">
+            <label for="task-waiting-reason">Waiting reason</label>
+            <textarea id="task-waiting-reason" rows="2" placeholder="Why it is waiting on Eddie or someone else"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="task-blocked-reason">Blocked reason</label>
+            <textarea id="task-blocked-reason" rows="2" placeholder="What is blocking this"></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn-secondary" id="cancel-btn">Cancel</button>
+            <button type="submit" class="btn-primary">Save Task</button>
+          </div>
+        </form>
+      </div>
     </div>
 
-    <script src="script.js"></script>
+    <div id="delete-modal" class="modal">
+      <div class="modal-content modal-small">
+        <h2>Delete task?</h2>
+        <p id="delete-task-name"></p>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" id="cancel-delete">Cancel</button>
+          <button type="button" class="btn-danger" id="confirm-delete">Delete</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>

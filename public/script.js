@@ -1,480 +1,448 @@
-// API Configuration
 const API_URL = window.location.origin;
 
-// State
 let boardData = null;
 let editingTaskId = null;
 let sortByPriority = false;
 
-// Priority order for sorting
 const priorityOrder = { high: 0, medium: 1, low: 2 };
 
-// Initialize
 document.addEventListener('DOMContentLoaded', () => {
-    loadBoard();
-    setupEventListeners();
+  setupEventListeners();
+  loadBoard();
 });
 
-// Setup Event Listeners
 function setupEventListeners() {
-    document.getElementById('add-task-btn').addEventListener('click', () => openTaskModal());
-    document.getElementById('close-modal').addEventListener('click', closeTaskModal);
-    document.getElementById('cancel-btn').addEventListener('click', closeTaskModal);
-    document.getElementById('task-form').addEventListener('submit', handleTaskSubmit);
-    document.getElementById('cancel-delete').addEventListener('click', closeDeleteModal);
-    document.getElementById('confirm-delete').addEventListener('click', handleDeleteConfirm);
-    document.getElementById('sort-priority').addEventListener('change', (e) => {
-        sortByPriority = e.target.checked;
-        renderBoard();
-    });
-    
-    // Close modals on backdrop click
-    document.getElementById('task-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'task-modal') closeTaskModal();
-    });
-    document.getElementById('delete-modal').addEventListener('click', (e) => {
-        if (e.target.id === 'delete-modal') closeDeleteModal();
-    });
+  document.getElementById('add-task-btn').addEventListener('click', () => openTaskModal());
+  document.getElementById('refresh-btn').addEventListener('click', loadBoard);
+  document.getElementById('close-modal').addEventListener('click', closeTaskModal);
+  document.getElementById('cancel-btn').addEventListener('click', closeTaskModal);
+  document.getElementById('task-form').addEventListener('submit', handleTaskSubmit);
+  document.getElementById('cancel-delete').addEventListener('click', closeDeleteModal);
+  document.getElementById('confirm-delete').addEventListener('click', handleDeleteConfirm);
+  document.getElementById('sort-priority').addEventListener('change', event => {
+    sortByPriority = event.target.checked;
+    renderDashboard();
+  });
+
+  document.getElementById('task-modal').addEventListener('click', event => {
+    if (event.target.id === 'task-modal') closeTaskModal();
+  });
+  document.getElementById('delete-modal').addEventListener('click', event => {
+    if (event.target.id === 'delete-modal') closeDeleteModal();
+  });
 }
 
-// Load Board Data
 async function loadBoard() {
-    try {
-        const response = await fetch(`${API_URL}/api/board`);
-        if (!response.ok) throw new Error('Failed to load board');
-        boardData = await response.json();
-        renderBoard();
-    } catch (error) {
-        console.error('Error loading board:', error);
-        alert('Failed to load board data');
-    }
+  try {
+    const response = await fetch(`${API_URL}/api/board`);
+    if (!response.ok) throw new Error('Failed to load dashboard');
+    boardData = await response.json();
+    renderDashboard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to load dashboard');
+  }
 }
 
-// Render Board
+function renderDashboard() {
+  if (!boardData) return;
+  renderSummary();
+  renderAttentionPanel();
+  renderBoard();
+  renderProjects();
+  renderGithub();
+  renderMetrics();
+  renderActivity();
+}
+
+function renderSummary() {
+  const tasks = Object.values(boardData.tasks || {});
+  const cards = [
+    { label: 'Active work', value: tasks.filter(task => task.columnId === 'in-progress').length, tone: 'blue' },
+    { label: 'Waiting on Eddie', value: tasks.filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie').length, tone: 'amber' },
+    { label: 'Blocked', value: tasks.filter(task => task.status === 'blocked' || task.columnId === 'blocked').length, tone: 'red' },
+    { label: 'Live projects', value: (boardData.projects || []).filter(project => project.status === 'live').length, tone: 'green' },
+    { label: 'API spend', value: `$${Number(boardData.metrics?.apiUsage?.spendUsd || 0).toFixed(2)}`, tone: 'purple' },
+    { label: 'Budget', value: `$${Number(boardData.metrics?.apiUsage?.budgetUsd || 0).toFixed(2)}`, tone: 'slate' }
+  ];
+
+  document.getElementById('summary-grid').innerHTML = cards.map(card => `
+    <article class="summary-card ${card.tone}">
+      <div class="summary-label">${card.label}</div>
+      <div class="summary-value">${card.value}</div>
+    </article>
+  `).join('');
+}
+
+function renderAttentionPanel() {
+  const attentionTasks = Object.values(boardData.tasks || {})
+    .filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie' || task.priority === 'high')
+    .sort((a, b) => priorityOrder[a.priority || 'medium'] - priorityOrder[b.priority || 'medium'])
+    .slice(0, 4);
+
+  document.getElementById('attention-panel').innerHTML = `
+    <div class="section-header compact">
+      <div>
+        <p class="section-kicker">Needs attention</p>
+        <h2>Things Eddie should see first</h2>
+      </div>
+    </div>
+    <div class="attention-list">
+      ${attentionTasks.length ? attentionTasks.map(task => `
+        <div class="attention-item">
+          <div>
+            <strong>${escapeHtml(task.title)}</strong>
+            <p>${escapeHtml(task.waitingReason || task.blockedReason || task.description || 'No note yet')}</p>
+          </div>
+          <div class="attention-meta">
+            <span class="pill ${task.nextActionBy === 'Eddie' ? 'warn' : 'neutral'}">${escapeHtml(task.nextActionBy || 'Arlo')}</span>
+            <span class="pill">${escapeHtml(task.dueText || 'No date')}</span>
+          </div>
+        </div>
+      `).join('') : '<p class="empty-state">Nothing urgent right now.</p>'}
+    </div>
+  `;
+}
+
 function renderBoard() {
-    if (!boardData) return;
-    
-    const boardEl = document.getElementById('board');
-    boardEl.innerHTML = '';
-    
-    boardData.columns.forEach(column => {
-        const columnEl = createColumnElement(column);
-        boardEl.appendChild(columnEl);
-    });
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = boardData.columns.map(column => createColumn(column)).join('');
+
+  document.querySelectorAll('.status-select').forEach(select => {
+    select.addEventListener('change', handleStatusChange);
+  });
+  document.querySelectorAll('.edit-btn').forEach(button => {
+    button.addEventListener('click', () => openTaskModal(button.dataset.taskId));
+  });
+  document.querySelectorAll('.delete-btn').forEach(button => {
+    button.addEventListener('click', () => openDeleteModal(button.dataset.taskId));
+  });
 }
 
-// Create Column Element
-function createColumnElement(column) {
-    const columnEl = document.createElement('div');
-    columnEl.className = 'column';
-    columnEl.dataset.columnId = column.id;
-    
-    // Get tasks for this column
-    let tasks = column.taskIds.map(id => boardData.tasks[id]).filter(task => task);
-    
-    // Sort by priority if enabled
-    if (sortByPriority) {
-        tasks.sort((a, b) => {
-            const priorityA = priorityOrder[a.priority || 'medium'];
-            const priorityB = priorityOrder[b.priority || 'medium'];
-            return priorityA - priorityB;
-        });
-    }
-    
-    columnEl.innerHTML = `
-        <div class="column-header">
-            <h2 class="column-title">${column.title}</h2>
-            <span class="task-count">${tasks.length}</span>
-        </div>
-        <div class="tasks-container" data-column-id="${column.id}">
-            ${tasks.length > 0 
-                ? tasks.map(task => createTaskCard(task)).join('') 
-                : '<div class="empty-state">No tasks</div>'}
-        </div>
-    `;
-    
-    // Setup drag and drop
-    const tasksContainer = columnEl.querySelector('.tasks-container');
-    setupDragAndDrop(tasksContainer);
-    
-    return columnEl;
+function createColumn(column) {
+  let tasks = (column.taskIds || []).map(id => boardData.tasks[id]).filter(Boolean);
+  if (sortByPriority) {
+    tasks = tasks.sort((a, b) => priorityOrder[a.priority || 'medium'] - priorityOrder[b.priority || 'medium']);
+  }
+
+  return `
+    <section class="column" data-column-id="${column.id}">
+      <div class="column-header">
+        <h3>${column.title}</h3>
+        <span class="task-count">${tasks.length}</span>
+      </div>
+      <div class="tasks-container">
+        ${tasks.length ? tasks.map(createTaskCard).join('') : '<div class="empty-state">No tasks</div>'}
+      </div>
+    </section>
+  `;
 }
 
-// Create Task Card HTML
 function createTaskCard(task) {
-    const priorityEmoji = {
-        high: '🔴',
-        medium: '🟡',
-        low: '🟢'
-    }[task.priority || 'medium'];
-    
-    const statusEmoji = {
-        pending: '⏳',
-        'in-progress': '🔄',
-        completed: '✅',
-        blocked: '🚫'
-    };
-    
-    // Calculate ETA display
-    let etaDisplay = '';
-    if (task.eta && task.requestStatus === 'in-progress') {
-        const minutesLeft = task.eta;
-        etaDisplay = `<div class="eta">⏱️ ETA: ~${minutesLeft} min</div>`;
-    }
-    
-    // Sub-agent progress section
-    let subagentSection = '';
-    if (task.subagentId || task.requestStatus) {
-        const statusIcon = statusEmoji[task.requestStatus] || '○';
-        const statusText = task.requestStatus ? task.requestStatus.replace('-', ' ') : 'Not started';
-        
-        let progressBar = '';
-        if (task.requestStatus === 'in-progress') {
-            // Indeterminate progress bar
-            progressBar = `
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: 60%"></div>
-                </div>
-            `;
-        } else if (task.requestStatus === 'completed') {
-            progressBar = `
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: 100%; background: #10b981;"></div>
-                </div>
-            `;
-        }
-        
-        subagentSection = `
-            <div class="subagent-progress">
-                <div class="status-row">
-                    <span class="status-icon">${statusIcon}</span>
-                    <strong>${statusText.toUpperCase()}</strong>
-                </div>
-                ${task.subagentId ? `<div style="font-size: 0.75rem; color: #666;">🤖 ${task.subagentId.substring(0, 8)}...</div>` : ''}
-                ${etaDisplay}
-                ${progressBar}
-            </div>
-        `;
-    }
-    
-    return `
-        <div class="task-card" draggable="true" data-task-id="${task.id}">
-            <div class="task-header">
-                <div class="task-title">${escapeHtml(task.title)}</div>
-                <div class="priority-badge">${priorityEmoji}</div>
-            </div>
-            
-            ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
-            
-            <div class="task-meta">
-                ${task.assignee ? `<span class="meta-tag">👤 ${escapeHtml(task.assignee)}</span>` : ''}
-                ${task.modelUsed ? `<span class="meta-tag">🤖 ${escapeHtml(task.modelUsed)}</span>` : ''}
-                ${task.agentType ? `<span class="meta-tag">⚙️ ${escapeHtml(task.agentType)}</span>` : ''}
-            </div>
-            
-            ${subagentSection}
-            
-            <div class="task-controls">
-                <select class="status-select" data-task-id="${task.id}">
-                    <option value="" disabled selected>Move to...</option>
-                    <option value="todo" ${task.columnId === 'todo' ? 'disabled' : ''}>📋 To Do</option>
-                    <option value="in-progress" ${task.columnId === 'in-progress' ? 'disabled' : ''}>🔄 In Progress</option>
-                    <option value="done" ${task.columnId === 'done' ? 'disabled' : ''}>✅ Done</option>
-                </select>
-                <button class="task-btn edit-btn" data-task-id="${task.id}" title="Edit">✏️</button>
-                <button class="task-btn delete-btn" data-task-id="${task.id}" title="Delete">🗑️</button>
-            </div>
+  const priorityEmoji = { high: '🔴', medium: '🟡', low: '🟢' }[task.priority || 'medium'];
+  const historyItems = (task.history || []).slice(0, 2).map(item => `<li>${escapeHtml(item.message)}</li>`).join('');
+
+  return `
+    <article class="task-card ${task.columnId === 'waiting-on-eddie' ? 'waiting' : ''} ${task.status === 'blocked' ? 'blocked' : ''}">
+      <div class="task-header">
+        <div>
+          <h4>${escapeHtml(task.title)}</h4>
+          <div class="task-subline">${priorityEmoji} ${escapeHtml(task.priority || 'medium')} · next: ${escapeHtml(task.nextActionBy || 'Arlo')}</div>
         </div>
-    `;
+        <span class="pill ${task.nextActionBy === 'Eddie' ? 'warn' : 'neutral'}">${escapeHtml(task.assignee || 'Unassigned')}</span>
+      </div>
+
+      ${task.description ? `<p class="task-description">${escapeHtml(task.description)}</p>` : ''}
+      ${task.waitingReason ? `<div class="info-strip amber">⏸ ${escapeHtml(task.waitingReason)}</div>` : ''}
+      ${task.blockedReason ? `<div class="info-strip red">🚫 ${escapeHtml(task.blockedReason)}</div>` : ''}
+
+      <div class="task-meta">
+        ${task.dueText ? `<span class="meta-tag">🗓 ${escapeHtml(task.dueText)}</span>` : ''}
+        ${task.tags?.map(tag => `<span class="meta-tag">#${escapeHtml(tag)}</span>`).join('') || ''}
+      </div>
+
+      ${task.links?.length ? `<div class="link-list">${task.links.map(link => `<a href="${escapeAttribute(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`).join('')}</div>` : ''}
+
+      ${historyItems ? `<ul class="history-snippet">${historyItems}</ul>` : ''}
+
+      <div class="task-controls">
+        <select class="status-select" data-task-id="${task.id}">
+          <option value="">Move to...</option>
+          ${boardData.columns.map(column => `<option value="${column.id}" ${column.id === task.columnId ? 'disabled' : ''}>${column.title}</option>`).join('')}
+        </select>
+        <button class="task-btn edit-btn" data-task-id="${task.id}" title="Edit">✏️</button>
+        <button class="task-btn delete-btn" data-task-id="${task.id}" title="Delete">🗑️</button>
+      </div>
+    </article>
+  `;
 }
 
-// Setup Drag and Drop
-function setupDragAndDrop(container) {
-    const taskCards = container.querySelectorAll('.task-card');
-    
-    taskCards.forEach(card => {
-        card.addEventListener('dragstart', handleDragStart);
-        card.addEventListener('dragend', handleDragEnd);
-        card.addEventListener('dragover', handleDragOver);
-        card.addEventListener('drop', handleDrop);
+function renderProjects() {
+  const projects = boardData.projects || [];
+  document.getElementById('projects-panel').innerHTML = `
+    <div class="section-header compact">
+      <div>
+        <p class="section-kicker">Hosted projects</p>
+        <h2>What is live or in motion</h2>
+      </div>
+    </div>
+    <div class="stack-list">
+      ${projects.map(project => `
+        <article class="list-card">
+          <div class="list-card-header">
+            <strong>${escapeHtml(project.name)}</strong>
+            <span class="pill ${project.status === 'live' ? 'success' : project.status === 'building' ? 'info' : 'neutral'}">${escapeHtml(project.status)}</span>
+          </div>
+          <p>${escapeHtml(project.notes || '')}</p>
+          <div class="mini-meta">
+            <span>${escapeHtml(project.environment || '')}</span>
+            <span>${escapeHtml(project.owner || '')}</span>
+          </div>
+          <div class="link-list">
+            ${project.url ? `<a href="${escapeAttribute(project.url)}" target="_blank" rel="noreferrer">Open app</a>` : ''}
+            ${project.repoUrl ? `<a href="${escapeAttribute(project.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}
+          </div>
+        </article>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderGithub() {
+  const github = boardData.github || { repos: [], recentActivity: [] };
+  document.getElementById('github-panel').innerHTML = `
+    <div class="section-header compact">
+      <div>
+        <p class="section-kicker">GitHub</p>
+        <h2>Repos + recent activity</h2>
+      </div>
+    </div>
+    <div class="stack-list compact-list">
+      ${github.repos.map(repo => `
+        <article class="list-card">
+          <div class="list-card-header">
+            <strong>${escapeHtml(repo.owner)}/${escapeHtml(repo.name)}</strong>
+            <span class="pill">${escapeHtml(repo.branch || 'main')}</span>
+          </div>
+          <p>${escapeHtml(repo.notes || '')}</p>
+          <div class="link-list">
+            ${repo.repoUrl ? `<a href="${escapeAttribute(repo.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}
+            ${repo.deployUrl ? `<a href="${escapeAttribute(repo.deployUrl)}" target="_blank" rel="noreferrer">Deploy</a>` : ''}
+          </div>
+        </article>
+      `).join('')}
+    </div>
+    <div class="subsection">
+      <h3>Recent history</h3>
+      <ul class="activity-list">
+        ${github.recentActivity.map(item => `
+          <li>
+            <span class="activity-title">${escapeHtml(item.title)}</span>
+            <a href="${escapeAttribute(item.url || '#')}" target="_blank" rel="noreferrer">${escapeHtml(item.repo || 'link')}</a>
+          </li>
+        `).join('')}
+      </ul>
+    </div>
+  `;
+}
+
+function renderMetrics() {
+  const apiUsage = boardData.metrics?.apiUsage || {};
+  const hosted = boardData.metrics?.hostedProjects || {};
+  document.getElementById('metrics-panel').innerHTML = `
+    <div class="section-header compact">
+      <div>
+        <p class="section-kicker">Ops metrics</p>
+        <h2>Usage + infrastructure snapshot</h2>
+      </div>
+    </div>
+    <div class="metrics-grid">
+      <div class="metric-box">
+        <span>Period</span>
+        <strong>${escapeHtml(apiUsage.periodLabel || 'Today')}</strong>
+      </div>
+      <div class="metric-box">
+        <span>Spend</span>
+        <strong>$${Number(apiUsage.spendUsd || 0).toFixed(2)}</strong>
+      </div>
+      <div class="metric-box">
+        <span>Budget</span>
+        <strong>$${Number(apiUsage.budgetUsd || 0).toFixed(2)}</strong>
+      </div>
+      <div class="metric-box">
+        <span>Live apps</span>
+        <strong>${Number(hosted.live || 0)}</strong>
+      </div>
+      <div class="metric-box">
+        <span>Building</span>
+        <strong>${Number(hosted.building || 0)}</strong>
+      </div>
+      <div class="metric-box">
+        <span>Issues</span>
+        <strong>${Number(hosted.issues || 0)}</strong>
+      </div>
+    </div>
+    <p class="panel-note">${escapeHtml(apiUsage.note || '')}</p>
+  `;
+}
+
+function renderActivity() {
+  const activity = boardData.activity || [];
+  document.getElementById('activity-panel').innerHTML = `
+    <div class="section-header compact">
+      <div>
+        <p class="section-kicker">History</p>
+        <h2>Recent activity feed</h2>
+      </div>
+    </div>
+    <ul class="activity-list">
+      ${activity.slice(0, 8).map(item => `
+        <li>
+          <span class="activity-title">${escapeHtml(item.message)}</span>
+          <span class="activity-time">${formatDate(item.createdAt)}</span>
+        </li>
+      `).join('')}
+    </ul>
+  `;
+}
+
+async function handleStatusChange(event) {
+  const taskId = event.target.dataset.taskId;
+  const toColumn = event.target.value;
+  event.target.value = '';
+  if (!taskId || !toColumn) return;
+
+  try {
+    const response = await fetch(`${API_URL}/api/tasks/${taskId}/move`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toColumn })
     });
-    
-    container.addEventListener('dragover', handleContainerDragOver);
-    container.addEventListener('drop', handleContainerDrop);
-    container.addEventListener('dragleave', handleDragLeave);
-    
-    // Setup status change select
-    const statusSelects = container.querySelectorAll('.status-select');
-    statusSelects.forEach(select => {
-        select.addEventListener('change', handleStatusChange);
-    });
-    
-    // Setup edit/delete buttons
-    const editBtns = container.querySelectorAll('.edit-btn');
-    const deleteBtns = container.querySelectorAll('.delete-btn');
-    
-    editBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const taskId = btn.dataset.taskId;
-            openTaskModal(taskId);
-        });
-    });
-    
-    deleteBtns.forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const taskId = btn.dataset.taskId;
-            openDeleteModal(taskId);
-        });
-    });
+    if (!response.ok) throw new Error('Failed to move task');
+    await loadBoard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to move task');
+  }
 }
 
-let draggedElement = null;
-let draggedTaskId = null;
-
-function handleDragStart(e) {
-    draggedElement = e.target;
-    draggedTaskId = e.target.dataset.taskId;
-    e.target.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/html', e.target.innerHTML);
-}
-
-function handleDragEnd(e) {
-    e.target.classList.remove('dragging');
-    document.querySelectorAll('.drag-over').forEach(el => {
-        el.classList.remove('drag-over');
-    });
-}
-
-function handleDragOver(e) {
-    if (e.preventDefault) e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    
-    const afterElement = getDragAfterElement(e.currentTarget.closest('.tasks-container'), e.clientY);
-    if (afterElement == null) {
-        e.currentTarget.closest('.tasks-container').classList.add('drag-over');
-    } else {
-        afterElement.classList.add('drag-over');
-    }
-    
-    return false;
-}
-
-function handleDrop(e) {
-    if (e.stopPropagation) e.stopPropagation();
-    return false;
-}
-
-function handleContainerDragOver(e) {
-    if (e.preventDefault) e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    e.currentTarget.classList.add('drag-over');
-    return false;
-}
-
-function handleContainerDrop(e) {
-    if (e.stopPropagation) e.stopPropagation();
-    e.preventDefault();
-    
-    const targetContainer = e.currentTarget;
-    const targetColumnId = targetContainer.dataset.columnId;
-    const fromColumn = draggedElement.closest('.tasks-container').dataset.columnId;
-    
-    targetContainer.classList.remove('drag-over');
-    
-    if (draggedTaskId && targetColumnId) {
-        moveTask(draggedTaskId, fromColumn, targetColumnId);
-    }
-    
-    return false;
-}
-
-function handleDragLeave(e) {
-    e.currentTarget.classList.remove('drag-over');
-}
-
-function getDragAfterElement(container, y) {
-    const draggableElements = [...container.querySelectorAll('.task-card:not(.dragging)')];
-    
-    return draggableElements.reduce((closest, child) => {
-        const box = child.getBoundingClientRect();
-        const offset = y - box.top - box.height / 2;
-        
-        if (offset < 0 && offset > closest.offset) {
-            return { offset: offset, element: child };
-        } else {
-            return closest;
-        }
-    }, { offset: Number.NEGATIVE_INFINITY }).element;
-}
-
-// Handle Status Change via Select
-async function handleStatusChange(e) {
-    const taskId = e.target.dataset.taskId;
-    const newColumnId = e.target.value;
-    const currentColumn = e.target.closest('.tasks-container').dataset.columnId;
-    
-    e.target.value = ''; // Reset select
-    
-    if (newColumnId && taskId) {
-        await moveTask(taskId, currentColumn, newColumnId);
-    }
-}
-
-// Move Task Between Columns
-async function moveTask(taskId, fromColumn, toColumn) {
-    try {
-        const response = await fetch(`${API_URL}/api/tasks/${taskId}/move`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fromColumn, toColumn })
-        });
-        
-        if (!response.ok) throw new Error('Failed to move task');
-        
-        const result = await response.json();
-        
-        // Update local state
-        boardData.tasks[taskId] = result.task;
-        
-        // Update column task IDs
-        boardData.columns.forEach(col => {
-            col.taskIds = col.taskIds.filter(id => id !== taskId);
-            if (col.id === toColumn) {
-                col.taskIds.push(taskId);
-            }
-        });
-        
-        renderBoard();
-    } catch (error) {
-        console.error('Error moving task:', error);
-        alert('Failed to move task');
-        loadBoard(); // Reload to sync state
-    }
-}
-
-// Modal Management
 function openTaskModal(taskId = null) {
-    const modal = document.getElementById('task-modal');
-    const modalTitle = document.getElementById('modal-title');
-    const form = document.getElementById('task-form');
-    
-    form.reset();
-    editingTaskId = taskId;
-    
-    if (taskId) {
-        modalTitle.textContent = 'Edit Task';
-        const task = boardData.tasks[taskId];
-        
-        document.getElementById('task-id').value = task.id;
-        document.getElementById('task-title').value = task.title;
-        document.getElementById('task-description').value = task.description || '';
-        document.getElementById('task-priority').value = task.priority || 'medium';
-        document.getElementById('task-assignee').value = task.assignee || '';
-        document.getElementById('task-model').value = task.modelUsed || '';
-        document.getElementById('task-agent-type').value = task.agentType || '';
-        document.getElementById('task-subagent-id').value = task.subagentId || '';
-        document.getElementById('task-request-status').value = task.requestStatus || '';
-        document.getElementById('task-eta').value = task.eta || '';
-    } else {
-        modalTitle.textContent = 'Add New Task';
-        editingTaskId = null;
-    }
-    
-    modal.classList.add('active');
+  const form = document.getElementById('task-form');
+  form.reset();
+  editingTaskId = taskId;
+  document.getElementById('modal-title').textContent = taskId ? 'Edit Task' : 'Add Task';
+
+  if (taskId) {
+    const task = boardData.tasks[taskId];
+    document.getElementById('task-title').value = task.title || '';
+    document.getElementById('task-description').value = task.description || '';
+    document.getElementById('task-column').value = task.columnId || 'todo';
+    document.getElementById('task-priority').value = task.priority || 'medium';
+    document.getElementById('task-assignee').value = task.assignee || '';
+    document.getElementById('task-next-action').value = task.nextActionBy || 'Arlo';
+    document.getElementById('task-due-text').value = task.dueText || '';
+    document.getElementById('task-tags').value = (task.tags || []).join(', ');
+    document.getElementById('task-links').value = (task.links || []).join(', ');
+    document.getElementById('task-waiting-reason').value = task.waitingReason || '';
+    document.getElementById('task-blocked-reason').value = task.blockedReason || '';
+  }
+
+  document.getElementById('task-modal').classList.add('active');
 }
 
 function closeTaskModal() {
-    document.getElementById('task-modal').classList.remove('active');
-    editingTaskId = null;
+  document.getElementById('task-modal').classList.remove('active');
+  editingTaskId = null;
 }
 
 function openDeleteModal(taskId) {
-    const task = boardData.tasks[taskId];
-    document.getElementById('delete-task-name').textContent = `"${task.title}"`;
-    document.getElementById('delete-modal').classList.add('active');
-    document.getElementById('delete-modal').dataset.taskId = taskId;
+  const task = boardData.tasks[taskId];
+  document.getElementById('delete-task-name').textContent = task ? task.title : '';
+  document.getElementById('delete-modal').dataset.taskId = taskId;
+  document.getElementById('delete-modal').classList.add('active');
 }
 
 function closeDeleteModal() {
-    document.getElementById('delete-modal').classList.remove('active');
+  document.getElementById('delete-modal').classList.remove('active');
 }
 
-// Handle Task Form Submit
-async function handleTaskSubmit(e) {
-    e.preventDefault();
-    
-    const taskData = {
-        title: document.getElementById('task-title').value,
-        description: document.getElementById('task-description').value,
-        priority: document.getElementById('task-priority').value,
-        assignee: document.getElementById('task-assignee').value,
-        modelUsed: document.getElementById('task-model').value,
-        agentType: document.getElementById('task-agent-type').value,
-        subagentId: document.getElementById('task-subagent-id').value,
-        requestStatus: document.getElementById('task-request-status').value,
-        eta: parseInt(document.getElementById('task-eta').value) || null
-    };
-    
-    try {
-        let response;
-        if (editingTaskId) {
-            // Update existing task
-            response = await fetch(`${API_URL}/api/tasks/${editingTaskId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(taskData)
-            });
-        } else {
-            // Create new task
-            response = await fetch(`${API_URL}/api/tasks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(taskData)
-            });
-        }
-        
-        if (!response.ok) throw new Error('Failed to save task');
-        
-        closeTaskModal();
-        loadBoard();
-    } catch (error) {
-        console.error('Error saving task:', error);
-        alert('Failed to save task');
-    }
+async function handleTaskSubmit(event) {
+  event.preventDefault();
+
+  const columnId = document.getElementById('task-column').value;
+  const statusMap = {
+    todo: 'pending',
+    'waiting-on-eddie': 'waiting',
+    'in-progress': 'active',
+    blocked: 'blocked',
+    done: 'completed'
+  };
+
+  const taskData = {
+    title: document.getElementById('task-title').value.trim(),
+    description: document.getElementById('task-description').value.trim(),
+    columnId,
+    status: statusMap[columnId],
+    priority: document.getElementById('task-priority').value,
+    assignee: document.getElementById('task-assignee').value.trim(),
+    nextActionBy: document.getElementById('task-next-action').value,
+    dueText: document.getElementById('task-due-text').value.trim(),
+    tags: document.getElementById('task-tags').value,
+    links: document.getElementById('task-links').value,
+    waitingReason: document.getElementById('task-waiting-reason').value.trim(),
+    blockedReason: document.getElementById('task-blocked-reason').value.trim()
+  };
+
+  try {
+    const url = editingTaskId ? `${API_URL}/api/tasks/${editingTaskId}` : `${API_URL}/api/tasks`;
+    const method = editingTaskId ? 'PUT' : 'POST';
+    const response = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(taskData)
+    });
+
+    if (!response.ok) throw new Error('Failed to save task');
+    closeTaskModal();
+    await loadBoard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to save task');
+  }
 }
 
-// Handle Delete Confirmation
 async function handleDeleteConfirm() {
-    const taskId = document.getElementById('delete-modal').dataset.taskId;
-    
-    try {
-        const response = await fetch(`${API_URL}/api/tasks/${taskId}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.ok) throw new Error('Failed to delete task');
-        
-        closeDeleteModal();
-        loadBoard();
-    } catch (error) {
-        console.error('Error deleting task:', error);
-        alert('Failed to delete task');
-    }
+  const taskId = document.getElementById('delete-modal').dataset.taskId;
+  try {
+    const response = await fetch(`${API_URL}/api/tasks/${taskId}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error('Failed to delete task');
+    closeDeleteModal();
+    await loadBoard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to delete task');
+  }
 }
 
-// Utility Functions
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  const div = document.createElement('div');
+  div.textContent = text ?? '';
+  return div.innerHTML;
 }
 
-// Auto-refresh every 30 seconds to catch updates from other clients
+function escapeAttribute(text) {
+  return String(text ?? '').replace(/"/g, '&quot;');
+}
+
 setInterval(() => {
-    if (!document.getElementById('task-modal').classList.contains('active')) {
-        loadBoard();
-    }
+  if (!document.getElementById('task-modal').classList.contains('active')) {
+    loadBoard();
+  }
 }, 30000);
