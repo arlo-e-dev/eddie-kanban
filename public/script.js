@@ -147,16 +147,16 @@ function renderSummary() {
   const monthlyBurn = Number(metrics.modelOps?.estimatedMonthlyUsd || 0);
   const revenueTarget = Number(metrics.revenue?.targetMonthlyUsd || 0);
   const cards = [
-    { label: 'Waiting on Eddie', value: tasks.filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie').length, tone: 'amber', big: true, target: 'attention-panel', filter: 'waiting-on-eddie', sublabel: 'Needs your click or answer' },
+    { label: 'Waiting on Eddie', value: tasks.filter(task => task.nextActionBy === 'Eddie' || task.columnId === 'waiting-on-eddie').length, tone: 'amber', target: 'attention-panel', filter: 'waiting-on-eddie', sublabel: 'Needs your click or answer' },
     { label: 'Active work', value: tasks.filter(task => task.columnId === 'in-progress').length, tone: 'blue', target: 'board', filter: 'in-progress', sublabel: 'Arlo currently moving on' },
     { label: 'Blocked', value: tasks.filter(task => task.status === 'blocked' || task.columnId === 'blocked').length, tone: 'red', target: 'board', filter: 'blocked', sublabel: 'Needs external unblock' },
     { label: 'Live projects', value: (boardData.projects || []).filter(project => project.status === 'live').length, tone: 'green', target: 'projects-panel', sublabel: 'Tap to open project area' },
-    { label: 'Monthly AI burn', value: `$${monthlyBurn.toFixed(0)}`, tone: 'purple', big: true, target: 'metrics-panel', progress: revenueTarget ? Math.min(100, Math.round((monthlyBurn / revenueTarget) * 100)) : 0, sublabel: revenueTarget ? `${Math.round((monthlyBurn / revenueTarget) * 100)}% of revenue target` : 'Estimated burn' },
+    { label: 'Monthly AI burn', value: `$${monthlyBurn.toFixed(0)}`, tone: 'purple', target: 'metrics-panel', progress: revenueTarget ? Math.min(100, Math.round((monthlyBurn / revenueTarget) * 100)) : 0, sublabel: revenueTarget ? `${Math.round((monthlyBurn / revenueTarget) * 100)}% of revenue target` : 'Estimated burn' },
     { label: 'Revenue target', value: `$${revenueTarget.toFixed(0)}`, tone: 'slate', target: 'metrics-panel', progress: 100, sublabel: 'Target monthly revenue' }
   ];
 
   document.getElementById('summary-grid').innerHTML = cards.map(card => `
-    <button class="summary-card ${card.tone} ${card.big ? 'big' : ''} summary-button" data-target="${card.target || ''}" data-filter="${card.filter || ''}">
+    <button class="summary-card ${card.tone} summary-button" data-target="${card.target || ''}" data-filter="${card.filter || ''}">
       <div class="summary-label">${card.label}</div>
       <div class="summary-value">${card.value}</div>
       <div class="summary-microcopy">${escapeHtml(card.sublabel || '')}</div>
