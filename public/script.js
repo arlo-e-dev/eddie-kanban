@@ -6,6 +6,15 @@ let sortByPriority = false;
 
 const priorityOrder = { high: 0, medium: 1, low: 2 };
 const liveDeployUrl = 'https://workspace-nine-lemon-81.vercel.app';
+const nextActionCycle = ['Arlo', 'Eddie', 'External'];
+const statusCycle = ['todo', 'waiting-on-eddie', 'in-progress', 'blocked', 'done'];
+const columnLabelMap = {
+  todo: 'Queued',
+  'waiting-on-eddie': 'Waiting',
+  'in-progress': 'In Progress',
+  blocked: 'Blocked',
+  done: 'Done'
+};
 
 document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
@@ -92,14 +101,11 @@ function navigateSummary(targetId, filterColumn = '') {
 function jumpToTask(taskId) {
   renderBoard();
   bindDynamicEvents();
-  const target = document.querySelector(`[data-task-id="${taskId}"]`)?.closest('.task-card');
+  const target = document.querySelector(`.task-card[data-task-card-id="${taskId}"]`);
   if (target) {
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     target.classList.add('task-flash');
     setTimeout(() => target.classList.remove('task-flash'), 1600);
-  } else {
-    const board = document.getElementById('board');
-    if (board) board.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 }
 
@@ -107,9 +113,6 @@ function bindDynamicEvents() {
   document.querySelectorAll('.status-select').forEach(select => select.addEventListener('change', handleStatusChange));
   document.querySelectorAll('.edit-btn').forEach(button => button.addEventListener('click', () => openTaskModal(button.dataset.taskId)));
   document.querySelectorAll('.delete-btn').forEach(button => button.addEventListener('click', () => openDeleteModal(button.dataset.taskId)));
-  document.querySelectorAll('[data-action="mark-done"]').forEach(button => button.addEventListener('click', () => quickMoveTask(button.dataset.taskId, 'done')));
-  document.querySelectorAll('[data-action="mark-waiting-eddie"]').forEach(button => button.addEventListener('click', () => quickMoveTask(button.dataset.taskId, 'waiting-on-eddie')));
-  document.querySelectorAll('[data-action="mark-in-progress"]').forEach(button => button.addEventListener('click', () => quickMoveTask(button.dataset.taskId, 'in-progress')));
   document.querySelectorAll('[data-action="save-note"]').forEach(button => button.addEventListener('click', () => saveTaskNote(button.dataset.taskId)));
   document.querySelectorAll('.note-input').forEach(input => {
     input.addEventListener('keydown', event => {
@@ -119,24 +122,20 @@ function bindDynamicEvents() {
       }
     });
   });
-  document.querySelectorAll('.attention-lane-select').forEach(select => {
-    select.addEventListener('change', event => {
-      const { taskId } = event.target.dataset;
-      const toColumn = event.target.value;
-      if (taskId && toColumn) quickMoveTask(taskId, toColumn);
-    });
-  });
-  document.querySelectorAll('.attention-assignee-input').forEach(input => {
-    input.addEventListener('change', event => updateAttentionTask(event.target.dataset.taskId));
-  });
-  document.querySelectorAll('.attention-next-action-select').forEach(select => {
-    select.addEventListener('change', event => updateAttentionTask(event.target.dataset.taskId));
-  });
   document.querySelectorAll('.summary-button').forEach(button => {
     button.addEventListener('click', () => navigateSummary(button.dataset.target, button.dataset.filter));
   });
   document.querySelectorAll('.attention-jump').forEach(button => {
     button.addEventListener('click', () => jumpToTask(button.dataset.taskId));
+  });
+  document.querySelectorAll('.inline-status-chip').forEach(button => {
+    button.addEventListener('click', () => cycleTaskStatus(button.dataset.taskId));
+  });
+  document.querySelectorAll('.inline-owner-chip').forEach(button => {
+    button.addEventListener('click', () => cycleNextAction(button.dataset.taskId));
+  });
+  document.querySelectorAll('.inline-assignee-chip').forEach(button => {
+    button.addEventListener('click', () => toggleAssignee(button.dataset.taskId));
   });
   const refreshGithubBtn = document.getElementById('refresh-github-btn');
   if (refreshGithubBtn) refreshGithubBtn.onclick = () => loadGithubData(true);
@@ -161,7 +160,7 @@ function renderSummary() {
       <div class="summary-label">${card.label}</div>
       <div class="summary-value">${card.value}</div>
       <div class="summary-microcopy">${escapeHtml(card.sublabel || '')}</div>
-      <div class="summary-progress"><span style="width:${Math.max(10, Number(card.progress || Math.min(100, Number(card.value) || 10)))}%; background:${sparkColor(card.tone)}"></span></div>
+      <div class="summary-progress"><span style="width:${Math.max(10, Number(card.progress || 10))}%; background:${sparkColor(card.tone)}"></span></div>
     </button>
   `).join('');
 }
@@ -176,7 +175,7 @@ function renderAttentionPanel() {
     <div class="section-header compact">
       <div>
         <p class="section-kicker">Needs attention</p>
-        <h2>Quick checkoffs + notes</h2>
+        <h2>Tap to update</h2>
       </div>
     </div>
     <div class="attention-list">
@@ -188,32 +187,18 @@ function renderAttentionPanel() {
 function attentionCard(task) {
   return `
     <div class="attention-item attention-card static-card" id="attention-${task.id}">
-      <div>
+      <div class="attention-headline">
         <button class="attention-jump" data-task-id="${task.id}">${escapeHtml(task.title)}</button>
-        <p>${escapeHtml(task.waitingReason || task.blockedReason || task.description || 'No note yet')}</p>
+        <div class="inline-meta-row">
+          <button class="pill inline-status-chip ${toneForColumn(task.columnId)}" data-task-id="${task.id}">${escapeHtml(columnLabelMap[task.columnId] || task.columnId)}</button>
+          <button class="pill inline-owner-chip ${task.nextActionBy === 'Eddie' ? 'warn' : 'neutral'}" data-task-id="${task.id}">${escapeHtml(task.nextActionBy || 'Arlo')}</button>
+          <button class="pill inline-assignee-chip neutral" data-task-id="${task.id}">${escapeHtml(task.assignee || 'Unassigned')}</button>
+        </div>
       </div>
-      <div class="attention-meta">
-        <span class="pill ${task.nextActionBy === 'Eddie' ? 'warn' : 'neutral'}">next: ${escapeHtml(task.nextActionBy || 'Arlo')}</span>
-        <span class="pill">${escapeHtml(task.dueText || 'No date')}</span>
-      </div>
+      <p>${escapeHtml(task.waitingReason || task.blockedReason || task.description || 'No note yet')}</p>
       ${(task.notes || []).length ? `<div class="notes-feed compact">${renderNotes(task.notes, 2)}</div>` : ''}
-      <div class="quick-actions">
-        <button class="mini-btn success" data-action="mark-done" data-task-id="${task.id}">✓ Done</button>
-        <button class="mini-btn" data-action="mark-in-progress" data-task-id="${task.id}">↻ Arlo on it</button>
-        <button class="mini-btn warn" data-action="mark-waiting-eddie" data-task-id="${task.id}">⏸ Waiting on Eddie</button>
-      </div>
-      <div class="attention-controls">
-        <select class="attention-lane-select" data-task-id="${task.id}">
-          ${boardData.columns.map(column => `<option value="${column.id}" ${column.id === task.columnId ? 'selected' : ''}>${column.title}</option>`).join('')}
-        </select>
-        <input class="attention-assignee-input" data-task-id="${task.id}" value="${escapeAttribute(task.assignee || '')}" placeholder="Assign to...">
-        <select class="attention-next-action-select" data-task-id="${task.id}">
-          ${['Arlo', 'Eddie', 'External'].map(owner => `<option value="${owner}" ${task.nextActionBy === owner ? 'selected' : ''}>Next: ${owner}</option>`).join('')}
-        </select>
-      </div>
-      <div class="note-composer">
-        <textarea class="note-input" data-task-id="${task.id}" rows="2" placeholder="Leave a note for this item"></textarea>
-        <button class="mini-btn primary" data-action="save-note" data-task-id="${task.id}">Add note</button>
+      <div class="note-composer slim">
+        <textarea class="note-input" data-task-id="${task.id}" rows="2" placeholder="Write note + hit Enter"></textarea>
       </div>
     </div>
   `;
@@ -228,7 +213,6 @@ function renderBoard(filterColumn = '') {
 function createColumn(column) {
   let tasks = (column.taskIds || []).map(id => boardData.tasks[id]).filter(Boolean);
   if (sortByPriority) tasks = tasks.sort((a, b) => priorityOrder[a.priority || 'medium'] - priorityOrder[b.priority || 'medium']);
-
   return `
     <section class="column" data-column-id="${column.id}">
       <div class="column-header">
@@ -245,9 +229,8 @@ function createColumn(column) {
 function createTaskCard(task) {
   const priorityEmoji = { high: '🔴', medium: '🟡', low: '🟢' }[task.priority || 'medium'];
   const historyItems = (task.history || []).slice(0, 2).map(item => `<li>${escapeHtml(item.message)}</li>`).join('');
-
   return `
-    <article class="task-card static-card ${task.columnId === 'waiting-on-eddie' ? 'waiting' : ''} ${task.status === 'blocked' ? 'blocked' : ''}">
+    <article class="task-card static-card ${task.columnId === 'waiting-on-eddie' ? 'waiting' : ''} ${task.status === 'blocked' ? 'blocked' : ''}" data-task-card-id="${task.id}">
       <div class="task-header">
         <div>
           <h4>${escapeHtml(task.title)}</h4>
@@ -267,7 +250,6 @@ function createTaskCard(task) {
       ${historyItems ? `<ul class="history-snippet">${historyItems}</ul>` : ''}
       <div class="note-composer compact">
         <textarea class="note-input" data-task-id="${task.id}" rows="2" placeholder="Add note"></textarea>
-        <button class="mini-btn primary" data-action="save-note" data-task-id="${task.id}">Add note</button>
       </div>
       <div class="task-controls">
         <select class="status-select" data-task-id="${task.id}">
@@ -294,12 +276,9 @@ function renderProjects() {
   const projects = (boardData.projects || []).map(project => project.id === 'kanban-server' || project.name === 'Eddie Dashboard'
     ? { ...project, status: 'live', url: liveDeployUrl, notes: 'Primary live dashboard. Dark-mode Vercel deployment only.' }
     : project);
-
   const liveCount = projects.filter(p => p.status === 'live').length;
   const buildingCount = projects.filter(p => p.status === 'building').length;
-  const projectRows = projects.map(project => {
-    const tone = project.status === 'live' ? 'green' : project.status === 'building' ? 'blue' : 'amber';
-    return `
+  const projectRows = projects.map(project => `
       <a class="list-card clickable-card" href="${escapeAttribute(project.url || project.repoUrl || '#')}" target="_blank" rel="noreferrer">
         <div class="list-card-header">
           <strong>${escapeHtml(project.name)}</strong>
@@ -314,27 +293,11 @@ function renderProjects() {
           ${project.url ? `<span class="project-card-link">Open app</span>` : ''}
           ${project.repoUrl ? `<span class="project-card-link">Repo</span>` : ''}
         </div>
-      </a>
-    `;
-  }).join('');
+      </a>`).join('');
 
   document.getElementById('projects-panel').innerHTML = `
-    <div class="section-header compact">
-      <div>
-        <p class="section-kicker">Hosted projects</p>
-        <h2>What is live or in motion</h2>
-      </div>
-    </div>
-    <div class="section-visual">
-      <div class="graph-card">
-        <div class="graph-caption">Project status split</div>
-        <div class="bar-graph">
-          ${barRow('Live', liveCount, projects.length || 1, 'green')}
-          ${barRow('Building', buildingCount, projects.length || 1, 'blue')}
-          ${barRow('Tracked', projects.length, projects.length || 1, 'amber')}
-        </div>
-      </div>
-    </div>
+    <div class="section-header compact"><div><p class="section-kicker">Hosted projects</p><h2>What is live or in motion</h2></div></div>
+    <div class="section-visual"><div class="graph-card"><div class="graph-caption">Project status split</div><div class="bar-graph">${barRow('Live', liveCount, projects.length || 1, 'green')}${barRow('Building', buildingCount, projects.length || 1, 'blue')}${barRow('Tracked', projects.length, projects.length || 1, 'amber')}</div></div></div>
     <div class="stack-list">${projectRows}</div>
   `;
 }
@@ -350,52 +313,17 @@ function renderGithub() {
           <span class="pill">${escapeHtml(repo.branch || 'main')}</span>
         </div>
         <p>${escapeHtml(repo.notes || '')}</p>
-        <div class="mini-meta">
-          <span>updated ${escapeHtml(formatDate(repo.pushedAt))}</span>
-          <span>${Number(repo.openIssues || 0)} open issues</span>
-          <span>${Number(repo.stars || 0)} ★</span>
-        </div>
+        <div class="mini-meta"><span>updated ${escapeHtml(formatDate(repo.pushedAt))}</span><span>${Number(repo.openIssues || 0)} open issues</span><span>${Number(repo.stars || 0)} ★</span></div>
         ${repo.fetchError ? `<div class="info-strip red">GitHub fetch error: ${escapeHtml(repo.fetchError)}</div>` : ''}
-        <div class="link-list">
-          ${repo.repoUrl ? `<a href="${escapeAttribute(repo.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}
-          ${deployUrl ? `<a href="${escapeAttribute(deployUrl)}" target="_blank" rel="noreferrer">Deploy</a>` : ''}
-        </div>
-      </article>
-    `;
+        <div class="link-list">${repo.repoUrl ? `<a href="${escapeAttribute(repo.repoUrl)}" target="_blank" rel="noreferrer">Repo</a>` : ''}${deployUrl ? `<a href="${escapeAttribute(deployUrl)}" target="_blank" rel="noreferrer">Deploy</a>` : ''}</div>
+      </article>`;
   }).join('');
 
   document.getElementById('github-panel').innerHTML = `
-    <div class="section-header compact">
-      <div>
-        <p class="section-kicker">GitHub</p>
-        <h2>Repos + recent activity</h2>
-      </div>
-      <button class="mini-btn" id="refresh-github-btn">Refresh GitHub</button>
-    </div>
-    <div class="section-visual">
-      <div class="graph-card">
-        <div class="graph-caption">Recent GitHub activity</div>
-        <div class="bar-graph">
-          ${barRow('Repos', (github.repos || []).length, 6, 'blue')}
-          ${barRow('Activity', (github.recentActivity || []).length, 12, 'purple')}
-          ${barRow('PRs', (github.recentActivity || []).filter(x => x.type === 'pr').length, 8, 'green')}
-          ${barRow('Commits', (github.recentActivity || []).filter(x => x.type === 'commit').length, 8, 'amber')}
-        </div>
-      </div>
-    </div>
+    <div class="section-header compact"><div><p class="section-kicker">GitHub</p><h2>Repos + recent activity</h2></div><button class="mini-btn" id="refresh-github-btn">Refresh GitHub</button></div>
+    <div class="section-visual"><div class="graph-card"><div class="graph-caption">Recent GitHub activity</div><div class="bar-graph">${barRow('Repos', (github.repos || []).length, 6, 'blue')}${barRow('Activity', (github.recentActivity || []).length, 12, 'purple')}${barRow('PRs', (github.recentActivity || []).filter(x => x.type === 'pr').length, 8, 'green')}${barRow('Commits', (github.recentActivity || []).filter(x => x.type === 'commit').length, 8, 'amber')}</div></div></div>
     <div class="stack-list compact-list">${repoRows}</div>
-    <div class="subsection">
-      <h3>Recent history</h3>
-      <ul class="activity-list">
-        ${(github.recentActivity || []).map(item => `
-          <li>
-            <span class="activity-title">${escapeHtml(item.title)}</span>
-            <span class="activity-time">${escapeHtml(item.repo || '')} · ${escapeHtml(formatDate(item.updatedAt))}</span>
-            <a href="${escapeAttribute(item.url || '#')}" target="_blank" rel="noreferrer">Open</a>
-          </li>
-        `).join('')}
-      </ul>
-    </div>
+    <div class="subsection"><h3>Recent history</h3><ul class="activity-list">${(github.recentActivity || []).map(item => `<li><span class="activity-title">${escapeHtml(item.title)}</span><span class="activity-time">${escapeHtml(item.repo || '')} · ${escapeHtml(formatDate(item.updatedAt))}</span><a href="${escapeAttribute(item.url || '#')}" target="_blank" rel="noreferrer">Open</a></li>`).join('')}</ul></div>
   `;
 }
 
@@ -406,35 +334,11 @@ function renderMetrics() {
   const revenue = metrics.revenue || {};
   const burn = Number(modelOps.estimatedMonthlyUsd || 0);
   const target = Number(revenue.targetMonthlyUsd || 0);
-
   document.getElementById('metrics-panel').innerHTML = `
-    <div class="section-header compact">
-      <div>
-        <p class="section-kicker">Ops metrics</p>
-        <h2>Costs + targets</h2>
-      </div>
-    </div>
-    <div class="ring-grid">
-      <div class="ring-stat"><div class="ring-value">$${Number(modelOps.chatgptSubscriptionUsd || 0).toFixed(0)}</div><div class="ring-label">ChatGPT</div></div>
-      <div class="ring-stat"><div class="ring-value">$${Number(modelOps.anthropicApiEstimateUsd || 0).toFixed(0)}</div><div class="ring-label">Anthropic/API</div></div>
-      <div class="ring-stat"><div class="ring-value">$${Number(modelOps.qwenEnergyEstimateUsd || 0).toFixed(0)}</div><div class="ring-label">Qwen energy</div></div>
-    </div>
-    <div class="section-visual">
-      <div class="graph-card">
-        <div class="graph-caption">Burn vs target</div>
-        <div class="bar-graph">
-          ${barRow('AI burn', burn, Math.max(target, burn, 1), 'purple')}
-          ${barRow('Revenue goal', target, Math.max(target, burn, 1), 'green')}
-          ${barRow('Live apps', Number(hosted.live || 0), Math.max(Number(hosted.total || 1), 1), 'blue')}
-        </div>
-      </div>
-    </div>
-    <div class="metrics-grid">
-      <div class="metric-box"><span>Total monthly AI burn</span><strong>$${burn.toFixed(0)}</strong></div>
-      <div class="metric-box"><span>Revenue target</span><strong>$${target.toFixed(0)}</strong></div>
-      <div class="metric-box"><span>Live apps</span><strong>${Number(hosted.live || 0)}</strong></div>
-      <div class="metric-box"><span>Tracked apps</span><strong>${Number(hosted.total || 0)}</strong></div>
-    </div>
+    <div class="section-header compact"><div><p class="section-kicker">Ops metrics</p><h2>Costs + targets</h2></div></div>
+    <div class="ring-grid"><div class="ring-stat"><div class="ring-value">$${Number(modelOps.chatgptSubscriptionUsd || 0).toFixed(0)}</div><div class="ring-label">ChatGPT</div></div><div class="ring-stat"><div class="ring-value">$${Number(modelOps.anthropicApiEstimateUsd || 0).toFixed(0)}</div><div class="ring-label">Anthropic/API</div></div><div class="ring-stat"><div class="ring-value">$${Number(modelOps.qwenEnergyEstimateUsd || 0).toFixed(0)}</div><div class="ring-label">Qwen energy</div></div></div>
+    <div class="section-visual"><div class="graph-card"><div class="graph-caption">Burn vs target</div><div class="bar-graph">${barRow('AI burn', burn, Math.max(target, burn, 1), 'purple')}${barRow('Revenue goal', target, Math.max(target, burn, 1), 'green')}${barRow('Live apps', Number(hosted.live || 0), Math.max(Number(hosted.total || 1), 1), 'blue')}</div></div></div>
+    <div class="metrics-grid"><div class="metric-box"><span>Total monthly AI burn</span><strong>$${burn.toFixed(0)}</strong></div><div class="metric-box"><span>Revenue target</span><strong>$${target.toFixed(0)}</strong></div><div class="metric-box"><span>Live apps</span><strong>${Number(hosted.live || 0)}</strong></div><div class="metric-box"><span>Tracked apps</span><strong>${Number(hosted.total || 0)}</strong></div></div>
     <p class="panel-note">${escapeHtml(modelOps.note || '')}</p>
   `;
 }
@@ -442,30 +346,9 @@ function renderMetrics() {
 function renderActivity() {
   const activity = boardData.activity || [];
   document.getElementById('activity-panel').innerHTML = `
-    <div class="section-header compact">
-      <div>
-        <p class="section-kicker">History</p>
-        <h2>Recent activity feed</h2>
-      </div>
-    </div>
-    <div class="section-visual">
-      <div class="graph-card">
-        <div class="graph-caption">Latest pulses</div>
-        <div class="bar-graph">
-          ${barRow('Tasks', activity.filter(x => x.type === 'task').length, 12, 'blue')}
-          ${barRow('Notes', activity.filter(x => x.type === 'note').length, 12, 'amber')}
-          ${barRow('GitHub', activity.filter(x => x.type === 'github').length, 12, 'purple')}
-        </div>
-      </div>
-    </div>
-    <ul class="activity-list">
-      ${activity.slice(0, 8).map(item => `
-        <li>
-          <span class="activity-title">${escapeHtml(item.message)}</span>
-          <span class="activity-time">${formatDate(item.createdAt)}</span>
-        </li>
-      `).join('')}
-    </ul>
+    <div class="section-header compact"><div><p class="section-kicker">History</p><h2>Recent activity feed</h2></div></div>
+    <div class="section-visual"><div class="graph-card"><div class="graph-caption">Latest pulses</div><div class="bar-graph">${barRow('Tasks', activity.filter(x => x.type === 'task').length, 12, 'blue')}${barRow('Notes', activity.filter(x => x.type === 'note').length, 12, 'amber')}${barRow('GitHub', activity.filter(x => x.type === 'github').length, 12, 'purple')}</div></div></div>
+    <ul class="activity-list">${activity.slice(0, 8).map(item => `<li><span class="activity-title">${escapeHtml(item.message)}</span><span class="activity-time">${formatDate(item.createdAt)}</span></li>`).join('')}</ul>
   `;
 }
 
@@ -476,6 +359,10 @@ function barRow(label, value, max, tone) {
 
 function sparkColor(tone) {
   return ({ blue: '#4f8cff', amber: '#f59e0b', red: '#ef4444', green: '#22c55e', purple: '#8b5cf6', slate: '#64748b' }[tone] || '#4f8cff');
+}
+
+function toneForColumn(columnId) {
+  return ({ 'waiting-on-eddie': 'warn', blocked: 'warn', 'in-progress': 'info', done: 'success', todo: 'neutral' }[columnId] || 'neutral');
 }
 
 async function handleStatusChange(event) {
@@ -499,6 +386,45 @@ async function quickMoveTask(taskId, toColumn) {
   }
 }
 
+async function cycleTaskStatus(taskId) {
+  const task = boardData.tasks[taskId];
+  if (!task) return;
+  const currentIndex = statusCycle.indexOf(task.columnId);
+  const nextColumn = statusCycle[(currentIndex + 1) % statusCycle.length];
+  await quickMoveTask(taskId, nextColumn);
+}
+
+async function cycleNextAction(taskId) {
+  const task = boardData.tasks[taskId];
+  if (!task) return;
+  const currentIndex = nextActionCycle.indexOf(task.nextActionBy || 'Arlo');
+  const nextActionBy = nextActionCycle[(currentIndex + 1) % nextActionCycle.length];
+  await patchTask(taskId, { nextActionBy });
+}
+
+async function toggleAssignee(taskId) {
+  const task = boardData.tasks[taskId];
+  if (!task) return;
+  const current = task.assignee || '';
+  const next = current === 'Arlo' ? 'Eddie' : current === 'Eddie' ? 'Arlo' : (task.nextActionBy === 'Eddie' ? 'Eddie' : 'Arlo');
+  await patchTask(taskId, { assignee: next });
+}
+
+async function patchTask(taskId, payload) {
+  try {
+    const response = await fetch(`${API_URL}/api/tasks/${taskId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error('Failed to update task');
+    await loadBoard();
+  } catch (error) {
+    console.error(error);
+    alert('Failed to update task');
+  }
+}
+
 async function saveTaskNote(taskId) {
   const input = document.querySelector(`.note-input[data-task-id="${taskId}"]`);
   if (!input) return;
@@ -514,28 +440,6 @@ async function saveTaskNote(taskId) {
   } catch (error) {
     console.error(error);
     alert('Failed to save note');
-  }
-}
-
-async function updateAttentionTask(taskId) {
-  const assigneeInput = document.querySelector(`.attention-assignee-input[data-task-id="${taskId}"]`);
-  const nextActionSelect = document.querySelector(`.attention-next-action-select[data-task-id="${taskId}"]`);
-  if (!assigneeInput || !nextActionSelect) return;
-
-  try {
-    const response = await fetch(`${API_URL}/api/tasks/${taskId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        assignee: assigneeInput.value.trim(),
-        nextActionBy: nextActionSelect.value
-      })
-    });
-    if (!response.ok) throw new Error('Failed to update task');
-    await loadBoard();
-  } catch (error) {
-    console.error(error);
-    alert('Failed to update task');
   }
 }
 

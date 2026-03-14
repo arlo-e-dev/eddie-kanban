@@ -176,6 +176,27 @@ input[type="checkbox"] {
 .attention-list, .stack-list, .activity-list, .history-snippet { display: grid; gap: 0.75rem; }
 .attention-item, .list-card { border-radius: 16px; padding: 0.9rem; background: var(--panel-2); }
 .attention-item { display: flex; flex-direction: column; gap: 0.75rem; }
+.attention-headline {
+  display: grid;
+  gap: 0.5rem;
+}
+.inline-meta-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.inline-status-chip,
+.inline-owner-chip,
+.inline-assignee-chip {
+  min-height: 32px;
+  padding: 0.35rem 0.7rem;
+}
+.note-composer.slim {
+  margin-top: 0.15rem;
+}
+.note-composer.slim textarea {
+  min-height: 58px;
+}
 .board { display: grid; gap: 1rem; grid-template-columns: repeat(5, minmax(260px, 1fr)); overflow-x: auto; padding-bottom: 0.25rem; }
 .column { min-width: 260px; background: var(--panel-3); }
 .column-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; }
